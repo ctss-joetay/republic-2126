@@ -296,11 +296,14 @@ against fixtures produced by an independent generator.
      see docs/RAILWAY_TEMPLATE.md. -->
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/REPLACE-ME)
 
-1. Press the button, sign in to Railway, and press **Deploy**. Leave the passwords blank.
-2. When it finishes, open the service's **Variables** tab and copy **`SETUP_CODE`**.
-3. Open **`https://<your-domain>/setup`**, paste the code, and choose (or generate) an admin
-   password and a hall key. Write both down.
-4. Open **`/admin`** and create a class room for each class.
+1. Press the button and sign in to Railway.
+2. Type an **admin password** (16+ characters) and a **hall key** (8+ characters) into the two
+   boxes Railway shows. Write both down.
+3. Press **Deploy**, and open your site's address when it finishes.
+4. Open **`/admin`**, enter the admin password, and create a class room for each class.
+
+If the admin password was too short, the site sends you to **`/setup`** to choose again; the
+code it asks for is `SETUP_CODE` in your service's Variables tab.
 
 Your copy is entirely your own: its own rooms, its own passwords, nothing shared with any other
 school. How the template is built is in [docs/RAILWAY_TEMPLATE.md](docs/RAILWAY_TEMPLATE.md).

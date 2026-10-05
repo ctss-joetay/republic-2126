@@ -39,20 +39,27 @@ Right-click the service → **Attach Volume**, mount path **`/data`**.
 The server saves every room and the passwords from the setup page to `/data`. Without a volume,
 both are lost on every redeploy, and the school would have to run setup again.
 
-## 4. Variables
+## 4. Variables — this is the wizard
+
+Railway's deploy page shows a box for every **required** variable that has no value, with your
+description underneath, and will not deploy until each is filled in. So the deploying teacher
+types the two passwords right there, and the site works the moment it is up. Nothing else to
+find or enter.
 
 In the service's **Variables** tab, add these four. The descriptions are what the deploying
 teacher sees, so they are written for them.
 
-| Variable | Default value | Description to show |
-|---|---|---|
-| `SETUP_CODE` | `${{secret(10, "ABCDEFGHJKMNPQRSTUVWXYZ23456789")}}` | One-time code for the /setup page. Leave as it is. |
-| `ADMIN_KEY` | *(leave empty, mark optional)* | Leave blank to choose it on the /setup page. At least 16 characters. |
-| `HALL_KEY` | *(leave empty, mark optional)* | Leave blank to choose it on the /setup page. At least 8 characters. |
-| `ROOM_TTL_DAYS` | `14` | Days an untouched room is kept. |
+| Variable | Value in the template | Required? | Description to show |
+|---|---|---|---|
+| `ADMIN_KEY` | *(leave empty)* | **Required** | Admin password: opens /admin, where you create class rooms. Keep it to yourself. At least 16 characters. |
+| `HALL_KEY` | *(leave empty)* | **Required** | Hall key: opens a hall room for the whole cohort. Give it to whoever runs the event. At least 8 characters, different from the admin password. |
+| `SETUP_CODE` | `${{secret(10, "ABCDEFGHJKMNPQRSTUVWXYZ23456789")}}` | optional | Backup only. Leave as it is. |
+| `ROOM_TTL_DAYS` | `14` | optional | Days an untouched room is kept. |
 
-`SETUP_CODE` is generated fresh for every deploy, so no two schools share one. It only works
-while no admin password exists. Once setup is done it does nothing.
+Railway cannot check a password's length. If someone types an admin password shorter than 16
+characters, the server ignores it and falls back to the `/setup` page instead, which asks for
+`SETUP_CODE` (in the same Variables tab) and lets them choose again. That backup is the only
+time a setup code is ever needed.
 
 ## 5. Create and share
 
@@ -68,12 +75,13 @@ To list it in Railway's public marketplace as well, use **Publish** on the templ
 
 ## What the deploying teacher does
 
-1. Click **Deploy on Railway**, sign in, and press **Deploy**. Leave the passwords blank.
-2. When it finishes, open the service's **Variables** tab and copy `SETUP_CODE`.
-   (It is also printed in the deploy log, under `SETUP CODE:`.)
-3. Open `https://<their-domain>/setup`, paste the code, and choose or generate the admin password
-   and hall key. Write both down.
-4. Open `/admin` and create a class room for each class.
+1. Click **Deploy on Railway** and sign in.
+2. Type an **admin password** and a **hall key** into the two boxes. Write both down.
+3. Press **Deploy**, wait for it to finish, and open the site's address.
+4. Open `/admin`, enter the admin password, and create a class room for each class.
+
+If the site says it has no admin password yet, the admin password was too short. Open
+`/setup` and follow the page; the code it asks for is `SETUP_CODE` in the Variables tab.
 
 ## Changing a password later
 

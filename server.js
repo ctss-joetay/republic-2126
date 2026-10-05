@@ -3034,6 +3034,8 @@ if(require.main === module){
       console.log('🔑 ============================================================');
       console.log('');
     }
+    if(ENV_ADMIN && ENV_ADMIN.length < 16)
+      console.warn(`⚠️  ADMIN_KEY is only ${ENV_ADMIN.length} characters — it needs at least 16, so it is being ignored.`);
     const shortHall = process.env.HALL_KEY && !HALL_ON;
     if(shortHall)
       console.warn(`⚠️  HALL_KEY is only ${String(process.env.HALL_KEY).length} characters — it needs at least 8, so it is being ignored.`);

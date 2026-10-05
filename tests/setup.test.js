@@ -167,6 +167,22 @@ const check = async (name, fn) => { ran++;
   });
   await cleanupServer(chosen.proc, chosen.dir);
 
+  /* The template asks for both keys on Railway's deploy page, but Railway
+     cannot check a length. A too-short ADMIN_KEY must not leave the site with
+     no way in: it is ignored, said so in the log, and setup opens as the backup. */
+  const tooShort = boot(3386, { ADMIN_KEY: 'short-key', HALL_KEY: 'Pq8Rs7Tu', SETUP_CODE: 'BACKUP2026' });
+  await tooShort.ready();
+  await check('a too-short ADMIN_KEY from Railway is ignored and setup opens as the backup', async () => {
+    assert.ok(/ADMIN_KEY is only 9 characters/.test(tooShort.log()), 'no warning about the short admin key');
+    const st = await tooShort.get('/api/setup/status');
+    assert.strictEqual(st.needed, true, 'setup did not open');
+    assert.strictEqual(st.hallFromRailway, true, 'the valid Railway hall key was not recognised');
+    const r = await tooShort.post('/api/setup', { code: 'BACKUP2026', adminKey: ADMIN });
+    assert.ok(r.ok, 'setup refused an admin-only save when the hall key is already set: ' + JSON.stringify(r));
+    assert.ok(!(await tooShort.post('/api/admin/list', { key: ADMIN })).error, 'the admin key chosen at setup does not work');
+  });
+  await cleanupServer(tooShort.proc, tooShort.dir);
+
   console.log(`\n${ran - fails}/${ran} passed`);
   process.exit(fails ? 1 : 0);
 })();
