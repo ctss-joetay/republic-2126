@@ -292,9 +292,7 @@ against fixtures produced by an independent generator.
 
 ### Deploy your own copy (for other schools)
 
-<!-- Replace the link below with your template's URL once it is created —
-     see docs/RAILWAY_TEMPLATE.md. -->
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/REPLACE-ME)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/4G-wDK)
 
 1. Press the button and sign in to Railway.
 2. Type an **admin password** (16+ characters) and a **hall key** (8+ characters) into the two
