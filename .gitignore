@@ -1,0 +1,8 @@
+node_modules/
+data/
+*.log
+.DS_Store
+.superpowers/
+
+# Claude Code session state and worktrees — never part of the app
+.claude/

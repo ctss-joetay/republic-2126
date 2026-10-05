@@ -1,0 +1,2374 @@
+/* ===========================================================================
+   city.js — the miniature isometric city for Republic 2126.
+   Zero dependencies. One canvas, one animation loop, driven entirely by the
+   six meters, the industries built and the policy cards chosen.
+
+   Buildings grow floor by floor as the economy rises and crack, darken and
+   fall to rubble as stability drops. Cars run the roads and citizens walk
+   the pavements at a density set by the economy. The sky, the smog and the
+   weather answer to Green and to whatever scenario card is on the table.
+   The plaza in the middle is the harmony scene: one crowd when the country
+   holds together, separated clusters behind fences when it does not.
+
+     const view = new CityView(canvasEl);
+     view.setCountry(country);        // { meters, industries, picks, name, ... }
+     view.setWeather('rain');         // clear haze rain flood drought quake night boom
+     view.destroy();
+   =========================================================================== */
+(function (global) {
+'use strict';
+
+/* ---------- layout ------------------------------------------------------ */
+const N      = 9;                 // 9 x 9 grid
+const ROADX  = [2, 6];            // roads running one way
+const ROADY  = [2, 6];            // roads running the other
+const PLAZA  = [3, 4, 5];         // the 3x3 civic square in the middle
+const PAD    = 1.2;               // sand rim around the built grid, in tiles
+const THICK  = 2.2;               // how far the sandy shore drops below the waterline
+const HEAD   = 7.0;               // headroom above the grid for the tallest towers
+
+/* Everything the camera has to fit, measured in half-tile widths / heights. */
+const SPAN_X = 2 * (N - 1 + 2 * PAD);
+const SPAN_Y = HEAD + (2 * N - 1 + 2 * PAD) + THICK;
+const BOTTOM = (2 * N - 1 + 2 * PAD) + THICK;
+
+const isRoad  = (x, y) => ROADX.indexOf(x) >= 0 || ROADY.indexOf(y) >= 0;
+const isPlaza = (x, y) => PLAZA.indexOf(x) >= 0 && PLAZA.indexOf(y) >= 0;
+
+/* Build slots, ordered from the centre outwards so the city grows outward. */
+const SLOTS = (function () {
+  const out = [];
+  for (let x = 0; x < N; x++) for (let y = 0; y < N; y++) {
+    if (isRoad(x, y) || isPlaza(x, y)) continue;
+    out.push({ x, y, d: Math.abs(x - 4) + Math.abs(y - 4) });
+  }
+  out.sort((a, b) => a.d - b.d || (a.x * 31 + a.y * 17) % 11 - (b.x * 31 + b.y * 17) % 11);
+  return out;
+})();
+
+/* The shoreline of a `coast` map, as a grid depth (gx + gy). A constant depth
+   projects to a horizontal-ish line, which is what makes the coast case cheap:
+   one wavy band, land above, water below, no new projection maths. */
+const SHORE = 13.4;
+
+/* The last grid depth that is reliably dry land on a coast. The shoreline
+   band wobbles up to amp*(1+rough) = 0.55*1.4 = 0.77 half-tiles above SHORE
+   at its highest excursion, so anything drawn past this can end up standing
+   in the surf. Flora, traffic and pedestrians all test against it. */
+const LANDWARD = SHORE - 1.2;
+
+/* Plots a country may build on. On a coast the front of the grid is water, so
+   those plots are removed before anything is assigned — otherwise _plan lays
+   houses into the sea. The cutoff is the shoreline's wobble, not SHORE itself:
+   the band swings up to 0.77 half-tiles landward of SHORE, reaching depth
+   ~12.63, and a building at depth 12 reaches 12.8 — standing in the surf.
+   11 is the last depth whose building (half-extent 0.4, so reaching
+   depth + 0.8 = 11.8) clears the surf at every point of the wobble. */
+const buildSlots = (form) =>
+  form === 'coast' ? SLOTS.filter(s => s.x + s.y <= 11) : SLOTS;
+
+/* One logical tile kind can draw as two different things depending on where
+   the country is. Only the seaport does today. */
+const tileFor = (kind, form) =>
+  (kind === 'port' && form === 'inland') ? 'depot' : kind;
+
+/* ---------- palette ----------------------------------------------------- */
+const KIND = {
+  home:  { top:'#e2b988', left:'#b98c5e', right:'#8d6642', roof:'#a9522f', lv:2,  win:1 },
+  fact:  { top:'#8b929c', left:'#697079', right:'#4d545c', roof:'#5a6169', lv:2,  win:1, stack:1, dirty:1 },
+  mine:  { top:'#7d6a56', left:'#5e4f40', right:'#43382d', roof:'#4a3f33', lv:1,  win:0, pit:1, dirty:1 },
+  port:  { top:'#5aa8c4', left:'#3d7f99', right:'#2b5d73', roof:'#2b5d73', lv:1,  win:1, crane:1 },
+  tech:  { top:'#79b6ea', left:'#4d86c0', right:'#345f8d', roof:'#345f8d', lv:4,  win:2, glass:1 },
+  tour:  { top:'#f0c3a4', left:'#cf9877', right:'#a3735a', roof:'#e0705f', lv:2,  win:1 },
+  care:  { top:'#eef2f7', left:'#c4ced9', right:'#9aa5b1', roof:'#d8455a', lv:2,  win:1, cross:1 },
+  civic: { top:'#e6c877', left:'#c1a252', right:'#8f7738', roof:'#c1a252', lv:2,  win:1, dome:1 },
+  faith: { top:'#e7d4a8', left:'#c4ae80', right:'#93805a', roof:'#d0a63c', lv:2,  win:1, spire:1 },
+  green: { lv:0, tree:1 },
+
+  /* landmarks — what the money and the points actually bought */
+  bank:  { top:'#f4e2ae', left:'#cdb478', right:'#9d8752', roof:'#c8a33c', lv:3,  win:1, money:1 },
+  uni:   { top:'#eddac9', left:'#c2977f', right:'#946f5c', roof:'#8d4a3a', lv:2,  win:1, clock:1 },
+  cult:  { top:'#eae3d6', left:'#c3bbab', right:'#948d80', roof:'#b9c6cc', lv:1,  win:1, arts:1 },
+  fort:  { top:'#98a181', left:'#727a5e', right:'#525845', roof:'#5a6049', lv:1,  win:0, radar:1, camo:1 },
+  guard: { top:'#a7b7bf', left:'#7c8c93', right:'#5b666c', roof:'#6b757b', lv:1,  win:0, gun:1, camo:1 },
+  air:   { top:'#9aa38a', left:'#747d63', right:'#535b47', roof:'#5f6650', lv:1,  win:0, heli:1, camo:1 },
+  mon:   { lv:1, obelisk:1 }
+};
+KIND.farm = { top:'#6aa84f', left:'#4e7f3a', right:'#3a5f2b', lv:0, field:1 };
+
+/* The inland counterpart of `port`. Port & logistics is offered to every
+   country whatever its homeland, so a landlocked one needs somewhere for the
+   lorries to go: a low freight shed with a loading bay, no crane, no water. */
+KIND.depot = { top:'#b9a98d', left:'#8e805f', right:'#6b6046', roof:'#8e805f',
+               lv:1, win:1, bay:1 };
+
+/* Policy cards that put a visible landmark on the map. */
+const CARD_TILE = {
+  /* education → campuses */
+  free:'uni', biling:'cult', tech:'tech', skills:'uni', elite:'uni', ban:'civic',
+  /* defence → barracks, batteries, listening posts */
+  ns:'fort', coast:'guard', cyber:'tech', buy:'air', peace:'civic', spy:'civic',
+  /* trade → money and shopfronts */
+  port:'port', sme:'home', fdi:'bank', tour:'tour', protect:'home', strip:'mine',
+  /* infrastructure → homes, faith, power */
+  mixed:'home', water:'civic', mrt:'civic', faith:'faith', solar:'green', coal:'fact',
+  /* older ids kept working */
+  housing:'home', transit:'civic', sanit:'civic'
+};
+
+/* What the Infrastructure ministry actually built, tile by tile. Deliberately
+   the same tiles the unlocking card maps to above — a group that bought Cheap
+   coal power and then built three coal plants should see three of the same
+   thing, not one card tile and three strangers. Keys must match ENGINE.BUILDINGS;
+   tests/housing.test.js fails if one of them grows a building this misses. */
+const BUILD_TILE = {
+  home:'home', estate:'home', mrt:'civic', solar:'green',
+  coal:'fact', park:'green', faith:'faith'
+};
+
+/* Homelands have different natural cover — this is what the coast looks like. */
+const LAND = {
+  delta:  { lush:1.20, rock:0.35, palm:0.45, sand:'#ddd0a0', far:'#8fa86d' },
+  high:   { lush:0.70, rock:1.70, palm:0.10, sand:'#cfc4ad' },
+  port:   { lush:0.80, rock:0.60, palm:0.95, sand:'#e6d3a6', jetty:1, far:'#7d9463' },
+  isles:  { lush:1.45, rock:0.45, palm:1.70, sand:'#efdcae', jetty:1 },
+  forest: { lush:1.80, rock:0.50, palm:0.15, sand:'#d9caa0' },
+  dry:    { lush:0.40, rock:1.35, palm:0.30, sand:'#e8d9ab' }
+};
+const LAND_DEF = { lush:1, rock:0.7, palm:0.6, sand:'#e0cda2' };
+
+/* ---------- how a country meets the world ------------------------------
+   island : water on every side          — today's behaviour, Green Isles only
+   coast  : land behind, water in front   — a delta or a harbour town
+   inland : no water at all               — `surround` says what fills the horizon
+
+   Keyed on the same homeland strings game_engine.js's HOMELANDS uses.
+   tests/terrain.test.js fails if the two ever drift apart. */
+const FORM = {
+  delta:  { form:'coast',  river:true },
+  port:   { form:'coast',  harbour:true },
+  isles:  { form:'island' },
+  high:   { form:'inland', surround:'ridge' },
+  forest: { form:'inland', surround:'canopy' },
+  dry:    { form:'inland', surround:'dune' }
+};
+/* game_engine's homelandOf() falls back to HOMELANDS[0] — delta — for a
+   homeland it does not recognise. Falling back anywhere else here would draw
+   a legacy country on one terrain while feeding it from another. */
+const formOf = (key) => FORM[key] || FORM.delta;
+
+/* What every layout in a city is seeded from — the plot assignment, the
+   coastline, the flora, the traffic.
+
+   `name` first, because that is what it has always been and the student's own
+   island must not move under them. `seed` is an explicit override that only
+   the foreign-city callers set (the projector and the leaderboard sheet), so
+   two countries that happen to share a name still draw different islands.
+   Setting `code` cannot do that job: name wins the || chain. And seeding on
+   pid outright would relay every island at the instant the mass game starts,
+   because a country's own copy has pid:'' during prep and gains a real one the
+   moment the client mirrors the server. */
+const seedOf = (c) => (c && (c.seed || c.name || c.code)) || 'republic';
+
+/* Who this country IS, as opposed to what it currently looks like. _plan
+   reuses matching buildings across calls so a skyline grows as the meters
+   rise; across a change of country that morphs one island into another, tower
+   by tower. This is the test for "cut, do not morph". */
+const identityOf = (c) => c ? String(c.pid || c.seed || c.code || c.name || '') : null;
+
+/* ---------- small helpers ---------------------------------------------- */
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp  = (a, b, t) => a + (b - a) * t;
+function mul32(seed) { return function () {
+  seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+  let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+  return ((t ^ t >>> 14) >>> 0) / 4294967296;
+}; }
+function hashStr(s) { let h = 2166136261; s = String(s || 'x');
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0; }
+function shade(hex, amt) {                       // amt −1..1
+  const n = parseInt(hex.slice(1), 16);
+  let r = n >> 16, g = n >> 8 & 255, b = n & 255;
+  const f = c => clamp(Math.round(amt > 0 ? c + (255 - c) * amt : c * (1 + amt)), 0, 255);
+  return '#' + ((1 << 24) + (f(r) << 16) + (f(g) << 8) + f(b)).toString(16).slice(1);
+}
+/* Blend two hex colours. shade() can only lighten or darken one colour, which
+   is no use when the point is to walk a cut face from the plain's own hue
+   toward earth — that is a change of hue, not of value. */
+function mix(a, b, t) {                          // t 0..1, 0 = all a
+  const A = parseInt(a.slice(1), 16), B = parseInt(b.slice(1), 16);
+  const f = sh => clamp(Math.round((A >> sh & 255) * (1 - t) + (B >> sh & 255) * t), 0, 255);
+  return '#' + ((1 << 24) + (f(16) << 16) + (f(8) << 8) + f(0)).toString(16).slice(1);
+}
+
+/* =========================================================================
+   CityView
+   ========================================================================= */
+function CityView(canvas, opts) {
+  opts = opts || {};
+  this.cv  = canvas;
+  this.ctx = canvas.getContext('2d');
+  this.dpr = Math.min(2, global.devicePixelRatio || 1);
+  this.t   = 0;                     // seconds since start
+  this.weather = 'clear';
+  this.wq  = 0;                     // weather intensity, eased
+  this.shake = 0;
+  this.compact = !!opts.compact;
+  this.showHud = opts.hud !== false;
+
+  this.m  = { E:50, H:50, S:50, K:50, D:50, G:50 };   // displayed (eased)
+  this.tm = { E:50, H:50, S:50, K:50, D:50, G:50 };   // target
+  this.country = null;
+  this.form = null;                 // set from the country's homeland; null = no country yet
+  this.buildings = [];
+  this.cars = [];
+  this.people = [];
+  this.crowd = [];
+  this.puffs = [];
+  this.drops = [];
+  this.clouds = [];
+  this.ships = [];
+  this.lorries = [];
+  this.delivery = null;
+  this._who = null;
+  this.birds = [];
+
+  this._onResize = this.resize.bind(this);
+  global.addEventListener('resize', this._onResize);
+  this.resize();
+  this._seedAmbient();
+  this._last = 0;
+  this._raf = null;
+  this._loop = this._loop.bind(this);
+  this.start();
+}
+
+CityView.prototype.destroy = function () {
+  this.stop();
+  global.removeEventListener('resize', this._onResize);
+};
+CityView.prototype.start = function () {
+  if (!this._raf) { this._last = 0; this._raf = requestAnimationFrame(this._loop); }
+};
+CityView.prototype.stop = function () {
+  if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
+};
+
+CityView.prototype.resize = function () {
+  const w = this.cv.clientWidth  || 640;
+  const h = this.cv.clientHeight || Math.round(w * 0.62);
+  this.W = w; this.H = h;
+  this.cv.width  = Math.round(w * this.dpr);
+  this.cv.height = Math.round(h * this.dpr);
+  this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+
+  /* Fit the whole 9x9 diamond, plus headroom for the tallest towers.
+     Projected width  = 2N·hw ; projected depth = 2N·hh = N·hw ;
+     headroom for ~6 storeys ≈ 3.5·hw. */
+  const byW = (w * 0.99) / SPAN_X;
+  const byH = (h * 0.98) / (SPAN_Y * 0.5);
+  this.hw = Math.max(5, Math.min(byW, byH));
+  this.hh = this.hw * 0.5;
+  this.ox = w / 2;
+  this.oy = h * 0.98 - BOTTOM * this.hh;
+};
+
+/* screen position of a grid cell centre */
+CityView.prototype.iso = function (gx, gy) {
+  return { x: this.ox + (gx - gy) * this.hw, y: this.oy + (gx + gy) * this.hh };
+};
+
+/* ---------- ambient furniture ------------------------------------------ */
+CityView.prototype._seedAmbient = function () {
+  const r = mul32(99);
+  this.clouds = [];
+  for (let i = 0; i < 5; i++)
+    this.clouds.push({ x: r() * 1.4 - 0.2, y: 0.06 + r() * 0.18, s: 0.5 + r(), v: 0.006 + r() * 0.012 });
+  this.birds = [];
+  for (let i = 0; i < 6; i++)
+    this.birds.push({ x: r(), y: 0.12 + r() * 0.14, v: 0.02 + r() * 0.03, p: r() * 6 });
+};
+
+/* =========================================================================
+   Country → city plan
+   ========================================================================= */
+CityView.prototype.setCountry = function (c, instant) {
+  this.country = c || null;
+  if (!c) { this.delivery = null; this._who = null; return; }
+  const was = this._who;
+  this._who = identityOf(c);
+  if (was !== null && this._who !== was) {
+    /* A different country entirely. _plan reuses matching buildings so a
+       skyline can grow as meters rise, and the eased meters, traffic and
+       crowd carry over the same way — all correct for one country over time,
+       all wrong across a spotlight change, where they read as one country
+       melting into another. Clear them and let the next _plan build fresh.
+
+       renderCity calls setCountry on EVERY poll for the same country, so this
+       has to be identity and not object identity: clearing unconditionally
+       would cut every delivery off after about a second and restart the
+       skyline from rubble four times a minute. */
+    this.delivery = null;
+    this.buildings = [];
+    this.mon = null;
+    this.cars = [];
+    this.people = [];
+    this.crowd = [];
+    Object.assign(this.m, c.meters || {});     /* no meter bars sliding across the cut */
+  }
+  const m = c.meters || {};
+  ['E','H','S','K','D','G'].forEach(k => { this.tm[k] = typeof m[k] === 'number' ? m[k] : 50; });
+  if (instant) Object.assign(this.m, this.tm);
+  this._plan(c);
+};
+
+/* landmarks live in the ring of plots closest to the square, so what a
+   country spent its points on is the first thing anyone looks at */
+const CIVIC = { uni:1, cult:1, bank:1, fort:1, guard:1, air:1, civic:1, faith:1 };
+const CIVIC_ORDER = ['cult', 'uni', 'bank', 'faith', 'fort', 'air', 'civic', 'guard'];
+const CORE = 8;
+
+CityView.prototype._plan = function (c) {
+  const ind   = c.industries || {};
+  const picks = [].concat(
+    (c.picks && c.picks.edu)   || [], (c.picks && c.picks.def)   || [],
+    (c.picks && c.picks.trade) || [], (c.picks && c.picks.infra) || []);
+  const m = this.tm;
+
+  /* --- the civic core: universities, culture halls, banks, barracks ----- */
+  const civic = [];
+  picks.forEach(k => { const t = CARD_TILE[k]; if (t && CIVIC[t]) civic.push(t); });
+  if (m.K >= 60) civic.push('uni');                   /* a country that learns builds campuses */
+  if (m.K >= 80) civic.push('uni');
+  if (m.H >= 64) civic.push('cult');                  /* and one that holds together builds halls */
+  if (m.H >= 82) civic.push('cult');
+  if (m.E >= 62) civic.push('bank');                  /* money shows up as money */
+  if (m.E >= 80) civic.push('bank');
+  if (m.D >= 60) civic.push('fort');
+  if (m.D >= 70 && m.E >= 58) civic.push('air');      /* an airbase only flies if you can pay for it */
+  if (m.D >= 76) civic.push('guard');
+  civic.sort((a, b) => CIVIC_ORDER.indexOf(a) - CIVIC_ORDER.indexOf(b));
+  /* two of a kind reads as "they really spent here"; three just looks like a bug */
+  const seen = {};
+  const core = civic.filter(k => (seen[k] = (seen[k] || 0) + 1) <= 2).slice(0, CORE);
+  while (core.length < CORE) core.push('green');       /* empty plots stay parkland */
+
+  /* --- industry and housing fill the rest of the island ----------------- */
+  const form = formOf(c.homeland).form;
+  const want = [];
+  const push = (kind, n) => { const t = tileFor(kind, form);
+                              for (let i = 0; i < n; i++) want.push(t); };
+  push('farm', Math.min(6, ind.farm || 0));
+  push('fact', Math.min(6, ind.fact || 0));
+  push('mine', Math.min(4, ind.mine || 0));
+  push('port', Math.min(3, ind.port || 0));
+  push('tech', Math.min(4, ind.tech || 0));
+  push('tour', Math.min(3, ind.tour || 0));
+  push('care', Math.min(3, ind.care || 0));
+  /* the Open trade port policy card lands on the same tile, so it takes the
+     same substitution */
+  picks.forEach(k => { const t = CARD_TILE[k]; if (t && !CIVIC[t]) want.push(tileFor(t, form)); });
+  /* The island used to be padded out to twelve homes whatever anyone did, so a
+     group that built five estates saw the same skyline as one that built
+     nothing — which made the whole Build step invisible here. The stand-in is
+     now just the half of the workforce a country starts out housing, and every
+     building a group places is a tile of its own on top of it. */
+  push('home', 4);
+  const bld = c.buildings || {};
+  for (const k in BUILD_TILE) push(BUILD_TILE[k], Math.min(6, bld[k] || 0));
+
+  /* green cover answers to the Green meter, filling the leftover slots */
+  const greens = Math.round(clamp((m.G - 20) / 80, 0, 1) * 12);
+  for (let i = 0; i < greens; i++) want.push('green');
+
+  const full = core.concat(want);
+  const rnd  = mul32(hashStr(seedOf(c)));
+  const slots = buildSlots(form);
+  const keep = [];
+  full.slice(0, slots.length).forEach((kind, i) => {
+    const slot = slots[i];
+    const old  = this.buildings.find(b => b.x === slot.x && b.y === slot.y);
+    keep.push(old && old.kind === kind ? Object.assign(old, { alive: true })
+      : { x: slot.x, y: slot.y, kind, h: 0, seed: rnd(), born: this.t, alive: true, rubble: 0 });
+  });
+  this.buildings = keep;
+
+  /* the national monument in the middle of the square */
+  if (!this.mon) this.mon = { x: 4, y: 4, kind: 'mon', h: 0, seed: 0.5, alive: true, rubble: 0, crack: 0 };
+
+  this._seedCrowd(rnd);
+  this._seedTraffic(rnd);
+
+  /* --- the land itself: coastline and natural cover --------------------- */
+  const key = seedOf(c) + '|' + (c.homeland || '');
+  if (this._landKey !== key) {
+    this._landKey = key;
+    this.land     = LAND[c.homeland] || LAND_DEF;
+    /* one lookup, cached — _backdrop, _island, _draw and the flora filter all
+       ask the same question, several times a frame */
+    const F = formOf(c.homeland);
+    this.form     = F.form;
+    this.surround = F.surround;
+    this.channels = !!F.river;
+    this.harbour  = !!F.harbour;
+    const lr = mul32(hashStr('land:' + key));
+    this.coast = this._coast(lr);
+    this._seedFlora(lr);
+  }
+
+  /* Seeded last, because `this.form` is only set inside the _landKey guard
+     above: run before it and the first call for a country reads the PREVIOUS
+     country's form, or null.
+
+     Shipping needs water. An inland country's freight moves by road instead —
+     see the lorries seeded below. `i` fixes which lane out at sea each ship
+     sails on; `x` is its position across the frame, 0..1, as before. */
+  this.ships = [];
+  const ports = Math.min(3, ind.port || 0);
+  const fleet = ports + (m.E > 65 ? 1 : 0);
+  if (this.form !== 'inland')
+    for (let i = 0; i < fleet; i++)
+      this.ships.push({ x: rnd(), v: 0.012 + rnd() * 0.016, s: 0.7 + rnd() * 0.6, i,
+                        cargo: cargoStack(rnd, Math.min(4, 1 + ports)) });
+
+  /* An inland country's freight arrives by road. One lorry per logistics
+     industry plus one if the economy is busy — the same rule the fleet uses,
+     so the two forms read as equally alive. `t` is a position along LANE, as
+     a gx, shuttling between the dock and the edge of the square. */
+  this.lorries = [];
+  if (this.form === 'inland')
+    for (let i = 0; i < fleet; i++)
+      this.lorries.push({ t: 3.2 + rnd() * (dockAt('inland') - 3.2),
+                          dir: rnd() < 0.5 ? 1 : -1,
+                          v: 0.5 + rnd() * 0.5, s: 0.9 + rnd() * 0.3,
+                          cargo: cargoStack(rnd, 1 + Math.floor(rnd() * 3)) });
+};
+
+/* ---------- an organic coastline instead of a hard diamond -------------- */
+CityView.prototype._coast = function (rnd) {
+  const R = N / 2 + PAD, cx = (N - 1) / 2, cy = (N - 1) / 2;
+  const H1 = [
+    { k: 2, a: 0.05 + rnd() * 0.06, p: rnd() * 6.283 },
+    { k: 3, a: 0.04 + rnd() * 0.05, p: rnd() * 6.283 },
+    { k: 5, a: 0.02 + rnd() * 0.035, p: rnd() * 6.283 },
+    { k: 8, a: 0.010 + rnd() * 0.018, p: rnd() * 6.283 }
+  ];
+  const STEPS = 96, ROUND = 0.34;       /* 0 = square island, 1 = round island */
+  const GRID = (N - 1) / 2 + 0.5;       /* the built grid must always stay on land */
+  const pts = [];
+  for (let i = 0; i < STEPS; i++) {
+    const t  = i / STEPS * Math.PI * 2;
+    const co = Math.cos(t), si = Math.sin(t);
+    const mx = Math.max(Math.abs(co), Math.abs(si), 1e-6);
+    const sq = R / mx;                                   /* the old square outline */
+    let f = 1;
+    for (let j = 0; j < H1.length; j++) f += H1[j].a * Math.cos(H1[j].k * t + H1[j].p);
+    let r = (sq * (1 - ROUND) + R * ROUND) * f;
+    r = clamp(r, GRID / mx + 0.60, sq);                  /* never eat the city, never grow */
+    const rh = Math.max(r * 0.79, GRID / mx + 0.14);     /* where the grass gives way to sand */
+    pts.push({ gx: cx + r * co,  gy: cy + r * si,
+               hx: cx + rh * co, hy: cy + rh * si });
+  }
+  return pts;
+};
+
+/* trees, palms, scrub and rocks between the built grid and the water */
+CityView.prototype._seedFlora = function (rnd) {
+  const cx = (N - 1) / 2, cy = (N - 1) / 2, L = this.land || LAND_DEF;
+  const n = this.coast.length;
+  this.flora = [];
+  for (let i = 0; i < 600 && this.flora.length < 86; i++) {
+    const pt = this.coast[Math.floor(rnd() * n)];
+    const k  = 0.72 + rnd() * 0.27;
+    const gx = cx + (pt.gx - cx) * k, gy = cy + (pt.gy - cy) * k;
+    if (Math.abs(gx - cx) < 4.62 && Math.abs(gy - cy) < 4.62) continue;   /* that's the city */
+    const beach = k > 0.82;
+    const r = rnd();
+    let kind = 'tree';
+    /* sand should read as sand — only the odd boulder, mostly palms and grass tufts */
+    if (beach) kind = r < 0.46 * L.palm ? 'palm' : r < 0.54 ? 'rock' : 'scrub';
+    else if (r < 0.14 * L.rock) kind = 'rock';
+    else if (r < 0.30) kind = 'scrub';
+    this.flora.push({ gx, gy, kind, seed: rnd(), q: rnd() / Math.max(0.35, L.lush) });
+  }
+  /* the jetty always runs off the front of the island, where it can be seen */
+  this.jetty = L.jetty ? { seg: Math.floor(rnd() * n * 0.25), len: 1.3 + rnd() * 0.8 } : null;
+};
+
+CityView.prototype._seedCrowd = function (rnd) {
+  const n = 22;
+  if (this.crowd.length === n) return;
+  this.crowd = [];
+  for (let i = 0; i < n; i++)
+    this.crowd.push({ gx: 3 + rnd() * 2, gy: 3 + rnd() * 2, tx: 4, ty: 4,
+                      hue: [0, 1, 2, 3][i % 4], ph: rnd() * 6 });
+};
+CityView.prototype._seedTraffic = function (rnd) {
+  if (this.cars.length) return;
+  const mk = (axis, line) => ({
+    axis, line, t: rnd() * (N - 1), dir: rnd() < 0.5 ? 1 : -1,
+    v: 0.5 + rnd() * 0.7, col: ['#e8e2d4','#d95f4c','#4c8fd9','#f0c04a','#7ec86a'][Math.floor(rnd() * 5)]
+  });
+  this.cars = [];
+  ROADX.forEach(l => { this.cars.push(mk('y', l)); this.cars.push(mk('y', l)); });
+  ROADY.forEach(l => { this.cars.push(mk('x', l)); this.cars.push(mk('x', l)); });
+  this.people = [];
+  for (let i = 0; i < 18; i++) {
+    const onX = rnd() < 0.5;
+    this.people.push({
+      axis: onX ? 'x' : 'y',
+      line: (onX ? ROADY : ROADX)[Math.floor(rnd() * 2)] + (rnd() < 0.5 ? 0.42 : -0.42),
+      t: rnd() * (N - 1), dir: rnd() < 0.5 ? 1 : -1, v: 0.12 + rnd() * 0.1,
+      hue: Math.floor(rnd() * 4)
+    });
+  }
+};
+
+/* ---------- weather ----------------------------------------------------- */
+CityView.prototype.setWeather = function (w) {
+  if (w === this.weather) return;
+  this.weather = w || 'clear';
+  if (w === 'quake') this.shake = 1;
+  this.drops = [];
+  if (w === 'rain' || w === 'flood') {
+    const r = mul32(7);
+    for (let i = 0; i < 130; i++)
+      this.drops.push({ x: r(), y: r(), v: 0.9 + r() * 0.8, l: 8 + r() * 14 });
+  }
+};
+/* Start one delivery. `incoming` is what arrives here, `outgoing` what leaves
+   in payment; both are {W,M,F}. Called by the app when one of this country's
+   own offers flips to accepted — CityView knows nothing about offers, ids or
+   who traded with whom, only what moved.
+
+   A second call replaces a running delivery rather than queueing it. In a busy
+   round a group can close three deals inside twenty seconds, and three
+   overlapping ships on one lane is not a story about anything. */
+CityView.prototype.deliver = function (incoming, outgoing, coins) {
+  const inb = CityView.cargoList(incoming), out = CityView.cargoList(outgoing);
+  if (!inb.length && !out.length && !(coins > 0)) return;
+  this.delivery = { el: 0, in: inb, out: out, coins: Math.max(0, coins || 0) };
+};
+
+/* map a scenario id from the engine onto a weather mood.
+
+   Every key in hall-scenarios.js needs an entry here, plus the drill's.
+   tests/city-view.test.js fails if one is missing — a card with no mood leaves
+   the projector on whatever it was showing before, which in a hall reads as
+   the card not having landed at all. */
+CityView.WEATHER_FOR = {
+  haze:'haze', quake:'quake', water:'drought', riot:'quake',
+  boom:'boom',  brain:'clear', pirate:'rain', ai:'night',
+  /* the four added for the 7 August 2026 hall */
+  cyber:'night', service:'clear', exercise:'rain', shadow:'night',
+  clinic:'clear'            /* the classroom drill behaves like a real card */
+};
+CityView.FORM   = FORM;
+CityView.formOf = formOf;
+CityView.seedOf     = seedOf;
+CityView.identityOf = identityOf;
+CityView.SHORE      = SHORE;
+CityView.LANDWARD   = LANDWARD;
+CityView.buildSlots = buildSlots;
+CityView.KIND    = KIND;
+CityView.tileFor = tileFor;
+
+/* =========================================================================
+   Loop
+   ========================================================================= */
+CityView.prototype._loop = function (ts) {
+  this._raf = requestAnimationFrame(this._loop);
+  if (!this._last) this._last = ts;
+  let dt = (ts - this._last) / 1000; this._last = ts;
+  if (dt > 0.12) dt = 0.12;                          // tab was hidden
+  this.t += dt;
+
+  /* ease meters toward their targets so changes read as growth */
+  ['E','H','S','K','D','G'].forEach(k => {
+    this.m[k] = lerp(this.m[k], this.tm[k], 1 - Math.pow(0.001, dt));
+  });
+  const wantW = this.weather === 'clear' ? 0 : 1;
+  this.wq = lerp(this.wq, wantW, 1 - Math.pow(0.02, dt));
+  this.shake = Math.max(0, this.shake - dt * 0.55);
+
+  this._step(dt);
+  this._draw();
+};
+
+CityView.prototype._step = function (dt) {
+  const m = this.m;
+  const grow = 0.5 + 1.05 * clamp(m.E / 100, 0, 1) + 0.25 * clamp(m.K / 100, 0, 1);
+  const decay = clamp((46 - m.S) / 46, 0, 1);
+
+  /* buildings rise toward their target height and crumble when unstable */
+  this.buildings.forEach(b => {
+    const K = KIND[b.kind] || KIND.home;
+    let target = (K.lv || 0) * grow * (0.75 + b.seed * 0.55);
+    if (b.kind === 'tech')  target *= 0.7 + 0.9 * clamp(m.K / 100, 0, 1);
+    if (b.kind === 'tour')  target *= 0.7 + 0.7 * clamp(m.G / 100, 0, 1);
+    if (b.kind === 'home')  target *= 0.8 + 0.6 * clamp(m.E / 100, 0, 1);
+    b.rubble = lerp(b.rubble, decay > 0.45 && b.seed < decay ? 1 : 0, 1 - Math.pow(0.15, dt));
+    target *= (1 - b.rubble * 0.72);
+    b.h = lerp(b.h, target, 1 - Math.pow(0.08, dt));
+    b.crack = decay;
+  });
+
+  /* traffic — density and speed follow the economy */
+  const busy = 0.35 + 1.15 * clamp(m.E / 100, 0, 1);
+  /* On a coast the far end of each road runs into the sea, so traffic has to
+     turn back at the water rather than at the edge of the grid. Depth is
+     line + t, so the limit is per-line. */
+  const lim = (line) => this.form === 'coast' ? Math.min(N - 1, LANDWARD - line) : N - 1;
+  this.cars.forEach(c => {
+    const L = lim(c.line);
+    c.t += c.dir * c.v * busy * dt * 2.1;
+    if (c.t > L) { c.t = L; c.dir = -1; }
+    if (c.t < 0) { c.t = 0; c.dir =  1; }
+  });
+  this.people.forEach(p => {
+    const L = lim(p.line);
+    p.t += p.dir * p.v * busy * dt * 2.6;
+    if (p.t > L) { p.t = L; p.dir = -1; }
+    if (p.t < 0) { p.t = 0; p.dir =  1; }
+  });
+
+  /* the plaza: one crowd when harmony is high, fenced-off clusters when low */
+  const unity = clamp((m.H - 28) / 52, 0, 1);
+  this.crowd.forEach((c, i) => {
+    const ring = i / this.crowd.length * Math.PI * 2 + this.t * 0.18;
+    const rad  = 0.55 + 0.35 * Math.sin(this.t * 0.6 + c.ph);
+    const together = { x: 4 + Math.cos(ring) * rad, y: 4 + Math.sin(ring) * rad };
+    const camp = [{ x: 3.15, y: 3.15 }, { x: 4.85, y: 3.15 }, { x: 4.0, y: 4.9 }][c.hue % 3];
+    const apart = { x: camp.x + Math.cos(ring * 2) * 0.28, y: camp.y + Math.sin(ring * 2) * 0.28 };
+    c.tx = lerp(apart.x, together.x, unity);
+    c.ty = lerp(apart.y, together.y, unity);
+    c.gx = lerp(c.gx, c.tx, 1 - Math.pow(0.25, dt));
+    c.gy = lerp(c.gy, c.ty, 1 - Math.pow(0.25, dt));
+  });
+
+  /* smoke from every chimney, thicker the dirtier the country */
+  const dirt = clamp((58 - m.G) / 58, 0, 1);
+  this.puffs = this.puffs.filter(p => (p.life -= dt) > 0);
+  this._emit = (this._emit || 0) + dt;
+  if (this._emit > 0.24) {
+    this._emit = 0;
+    this.buildings.forEach(b => {
+      const K = KIND[b.kind] || {};
+      if (!K.stack || b.rubble > 0.6) return;
+      if (Math.random() > 0.35 + dirt * 0.6) return;
+      this.puffs.push({ x: b.x, y: b.y, z: b.h, life: 2.6 + Math.random() * 1.4,
+                        max: 2.6, drift: (Math.random() - 0.5) * 0.5, r: 5 + Math.random() * 5 });
+    });
+  }
+  this.puffs.forEach(p => { p.z += dt * 9; p.x += p.drift * dt * 0.2; });
+
+  this.clouds.forEach(c => { c.x += c.v * dt; if (c.x > 1.3) c.x = -0.3; });
+  this.birds.forEach(b => { b.x += b.v * dt; if (b.x > 1.15) b.x = -0.15; });
+  this.ships.forEach(s => { s.x += s.v * dt; if (s.x > 1.2) s.x = -0.2; });
+
+  /* lorries shuttle the arrival lane between the dock and the square, at the
+     same economy-driven pace as the cars */
+  const freightLim = dockAt('inland');
+  this.lorries.forEach(l => {
+    l.t += l.dir * l.v * busy * dt * 1.5;
+    if (l.t > freightLim) { l.t = freightLim; l.dir = -1; }
+    if (l.t < 3.2)        { l.t = 3.2;        l.dir =  1; }
+  });
+
+  if (this.delivery) {
+    this.delivery.el += dt;
+    if (this.delivery.el >= DELIVERY_SECS) this.delivery = null;
+  }
+  this.drops.forEach(d => { d.y += d.v * dt * 1.6; if (d.y > 1) { d.y = -0.05; d.x = Math.random(); } });
+};
+
+/* =========================================================================
+   Drawing
+   ========================================================================= */
+CityView.prototype._draw = function () {
+  const g = this.ctx, W = this.W, H = this.H, m = this.m;
+  const night = this.weather === 'night';
+  const dirt  = clamp((58 - m.G) / 58, 0, 1);
+
+  g.save();
+  if (this.shake > 0.01) {
+    const s = this.shake * 5;
+    g.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
+  }
+
+  this._sky(g, W, H, night, dirt);
+  this._backdrop(g, night);
+  this._island(g, night);
+  this._ground(g, night);
+  if (this.form === 'coast') this._shore(g, night);
+
+  /* everything on the map, painted back to front */
+  const items = [];
+  this.buildings.forEach(b => items.push({ o: b.x + b.y, z: 1, b }));
+  if (this.mon) items.push({ o: this.mon.x + this.mon.y, z: 0.95, mon: 1 });
+  const cover = clamp((this.m.G - 6) / 68, 0.18, 1);
+  /* On a coast the front arc of the flora ring lies seaward of the shoreline,
+     and flora is painted after _shore — so without this guard palms and scrub
+     stand on open water. LANDWARD clears the shoreline's own wobble. */
+  (this.flora || []).forEach(f => {
+    if (f.kind !== 'rock' && f.q > cover) return;          /* cover thins as green falls */
+    if (this.form === 'coast' && f.gx + f.gy > LANDWARD) return;  /* that stretch of ring is sea */
+    items.push({ o: f.gx + f.gy, z: 0.7, fl: f });
+  });
+  this.cars.forEach(c => {
+    const gx = c.axis === 'y' ? c.line : c.t, gy = c.axis === 'y' ? c.t : c.line;
+    items.push({ o: gx + gy, z: 0.4, car: c, gx, gy });
+  });
+  this.people.forEach(p => {
+    const gx = p.axis === 'y' ? p.line : p.t, gy = p.axis === 'y' ? p.t : p.line;
+    items.push({ o: gx + gy, z: 0.5, ped: p, gx, gy });
+  });
+  this.crowd.forEach(c => items.push({ o: c.gx + c.gy, z: 0.5, cit: c, gx: c.gx, gy: c.gy }));
+
+  /* Coastal shipping sails in FRONT of the town, so it sorts against
+     buildings, flora and the surf like everything else. Island shipping is
+     behind the island and is drawn by _backdrop instead. */
+  if (this.form === 'coast') {
+    const uSpan = shipSpan(this.W, this.hw);
+    this.ships.forEach(s => {
+      const d = shipDepth(this.form, s.i);
+      const u = (s.x * 2 - 1) * uSpan;
+      items.push({ o: d, z: 0.3, ship: s, gx: (d + u) / 2, gy: (d - u) / 2 });
+    });
+  }
+
+  this.lorries.forEach(l => {
+    items.push({ o: l.t + LANE, z: 0.45, lorry: l, gx: l.t, gy: LANE });
+  });
+
+  /* the delivery: one vessel on the arrival lane, and porters walking its
+     cargo up the road into the square */
+  if (this.delivery) {
+    const dock = dockAt(this.form);
+    const s = deliveryAt(this.delivery.el, dock);
+    if (s) {
+      /* s.u is where the nose is; the drawn centre sits half a length behind it */
+      const vx = s.u + noseOffset(this.form);
+      items.push({ o: vx + LANE, z: 0.46, dlv: s, gx: vx, gy: LANE,
+                   cargo: aboardAt(s, this.delivery.in, this.delivery.out) });
+
+      /* porters, strung out along the road behind the leader */
+      const SQUARE = 4;                       /* gx of the square, on this lane */
+      this.delivery.in.forEach((c, i) => {
+        const k = clamp(s.walk * 1.35 - i * 0.11, 0, 1);
+        if (k <= 0) return;
+        const gx = lerp(dock - 0.4, SQUARE, k);
+        items.push({ o: gx + LANE + 0.02, z: 0.52, port: c, hue: i % 4,
+                     gx, gy: LANE + (i % 2 ? 0.24 : -0.24) });
+      });
+    }
+  }
+
+  items.sort((a, b) => a.o - b.o || a.z - b.z);
+
+  items.forEach(it => {
+    if (it.b)   this._building(g, it.b, night);
+    if (it.fl)  this._flora(g, it.fl, night);
+    if (it.mon) this._monument(g, night);
+    if (it.car) this._car(g, it.gx, it.gy, it.car, night);
+    if (it.ped) this._person(g, it.gx, it.gy, it.ped.hue, 0.85, night);
+    if (it.cit) this._person(g, it.gx, it.gy, it.cit.hue, 1, night);
+    if (it.ship) this._vessel(g, it.gx, it.gy, 0.707, -0.707, it.ship.s, it.ship.cargo, night);
+    if (it.lorry) this._lorry(g, it.gx, it.gy, it.lorry.dir, 0, it.lorry.s, it.lorry.cargo, night);
+    if (it.dlv) {
+      const head = it.dlv.phase === 'out' ? 1 : -1;      /* bow towards the town, then away */
+      if (this.form === 'inland') this._lorry(g, it.gx, it.gy, head, 0, 1.1, it.cargo, night);
+      else                        this._vessel(g, it.gx, it.gy, head, 0, 1.15, it.cargo, night);
+    }
+    if (it.port) this._porter(g, it.gx, it.gy, it.hue, it.port, night);
+  });
+
+  this._smoke(g, dirt);
+  this._weather(g, W, H);
+  this._smog(g, W, H, dirt);
+  if (m.S < 42) this._cracks(g, W, H, clamp((42 - m.S) / 42, 0, 1));
+  g.restore();
+};
+
+/* ---------- sky --------------------------------------------------------- */
+CityView.prototype._sky = function (g, W, H, night, dirt) {
+  const green = clamp(this.m.G / 100, 0, 1);
+  let top, bot;
+  if (night)                        { top = '#0a1430'; bot = '#243a5e'; }
+  else if (this.weather === 'rain' || this.weather === 'flood') { top = '#4a5a68'; bot = '#8d9aa6'; }
+  else if (this.weather === 'drought') { top = '#c99a4e'; bot = '#e8d0a0'; }
+  else {
+    top = green > 0.6 ? '#2f8fdc' : green > 0.42 ? '#5c8bab' : '#8a7f68';
+    bot = green > 0.6 ? '#cfeaff' : green > 0.42 ? '#c8ccc6' : '#d3c39f';
+  }
+  if (this.weather === 'rain' || this.weather === 'flood') { top = '#4a5a68'; bot = '#8d9aa6'; }
+  const grd = g.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, top); grd.addColorStop(1, bot);
+  g.fillStyle = grd; g.fillRect(0, 0, W, H);
+
+  /* sun or moon */
+  const sx = W * 0.84, sy = H * 0.15;
+  g.save();
+  g.globalAlpha = night ? 0.9 : 0.95 - dirt * 0.5;
+  g.fillStyle = night ? '#e8eeff' : '#ffe9a8';
+  g.shadowColor = night ? 'rgba(200,220,255,.7)' : 'rgba(255,220,120,.85)';
+  g.shadowBlur = 26;
+  g.beginPath(); g.arc(sx, sy, Math.max(9, W * 0.022), 0, 7); g.fill();
+  g.restore();
+
+  /* stars at night */
+  if (night) {
+    const r = mul32(4);
+    g.fillStyle = 'rgba(255,255,255,.8)';
+    for (let i = 0; i < 40; i++) {
+      const x = r() * W, y = r() * H * 0.42;
+      g.globalAlpha = 0.25 + 0.6 * Math.abs(Math.sin(this.t * 0.8 + i));
+      g.fillRect(x, y, 1.6, 1.6);
+    }
+    g.globalAlpha = 1;
+  }
+
+  /* clouds */
+  g.fillStyle = night ? 'rgba(180,196,224,.20)'
+    : this.weather === 'rain' || this.weather === 'flood' ? 'rgba(70,80,92,.55)'
+    : 'rgba(255,255,255,' + (0.55 - dirt * 0.25) + ')';
+  this.clouds.forEach(c => {
+    const x = c.x * W, y = c.y * H, s = c.s * Math.max(12, W * 0.035);
+    g.beginPath();
+    g.arc(x, y, s * 0.6, 0, 7); g.arc(x + s * 0.55, y + s * 0.1, s * 0.45, 0, 7);
+    g.arc(x - s * 0.5, y + s * 0.12, s * 0.4, 0, 7); g.fill();
+  });
+
+  /* birds only show up in a clean sky */
+  if (!night && this.m.G > 55 && this.weather !== 'rain') {
+    g.strokeStyle = 'rgba(30,45,60,.45)'; g.lineWidth = 1.4;
+    this.birds.forEach(b => {
+      const x = b.x * W, y = b.y * H + Math.sin(this.t * 2 + b.p) * 3, s = 5;
+      g.beginPath();
+      g.moveTo(x - s, y); g.quadraticCurveTo(x - s / 2, y - s / 2, x, y);
+      g.quadraticCurveTo(x + s / 2, y - s / 2, x + s, y); g.stroke();
+    });
+  }
+};
+
+/* What fills the horizon of a country with no coastline. `base` is an offset
+   from the horizon in half-tiles; bands are listed far to near and each fills
+   downward from its own line, so the LAST entry is whatever the country
+   actually stands in. Get that order wrong and the nearest ridge floods the
+   foreground and the map reads as an island again. */
+const SURROUND = {
+  /* Atmospheric perspective, not a stack of greys. The farthest range is pale
+     and hazy — nearly sky — and each nearer one carries more of the olive the
+     country actually stands in, so the last ridge settles into the plain
+     instead of butting against it. Grey-blue all the way down was the one
+     surround whose horizon and ground disagreed. */
+  ridge: [
+    { col:'#a2b0bd', base: 3.2, amp:3.4, freq:0.0260, phase:1.2, rough:0.75, snow:true },
+    { col:'#88958f', base: 5.2, amp:2.2, freq:0.0310, phase:3.9, rough:0.65 },
+    { col:'#79876f', base: 6.5, amp:1.4, freq:0.0380, phase:0.4, rough:0.65 },
+    { col:'#7d8b62', base: 7.6, amp:0.7, freq:0.0052, phase:2.4, rough:0.35, plain:true }
+  ],
+  canopy: [
+    { col:'#7d9a86', base:-0.2, amp:1.5, freq:0.0190, phase:0.8, rough:0.90 },
+    { col:'#4e7a52', base: 1.0, amp:1.3, freq:0.0260, phase:2.6, rough:1.00 },
+    { col:'#3b6440', base: 2.1, amp:1.1, freq:0.0340, phase:4.4, rough:1.10 },
+    { col:'#5b8a4c', base: 3.5, amp:0.7, freq:0.0052, phase:2.4, rough:0.35, plain:true }
+  ],
+  dune: [
+    { col:'#e0cf9f', base:-0.1, amp:1.3, freq:0.0055, phase:2.0, rough:0.20 },
+    { col:'#cdb87f', base: 1.1, amp:1.5, freq:0.0072, phase:5.0, rough:0.25 },
+    { col:'#b8a066', base: 2.2, amp:1.2, freq:0.0098, phase:1.4, rough:0.30 },
+    { col:'#cbb87e', base: 3.5, amp:0.7, freq:0.0052, phase:2.4, rough:0.35, plain:true }
+  ]
+};
+const surroundBands = (s) => SURROUND[s] || SURROUND.ridge;
+/* exposed next to the const it wraps — the earlier CityView.* static group
+   (near WEATHER_FOR) runs before this declaration exists in file order, so
+   assigning it there would throw a TDZ ReferenceError on load. */
+CityView.surroundBands = surroundBands;
+
+/* What a country's ground is cut from where it drops away. Inland there is no
+   waterline, so the sand-and-shallows treatment is simply wrong; earth and
+   rock replace it.
+
+   These are not free choices. A fixed rock colour can always end up quarrelling
+   with the plain it stands in — a dark brown wall against the Forest Belt's
+   bright green was exactly that — so each is the country's own plain walked
+   part of the way toward bare earth. Whatever the plain is, the cut face is a
+   relative of it. */
+const EARTH = '#7a6a52';
+const plainCol = (s) => { const b = surroundBands(s); return b[b.length - 1].col; };
+const SHELF_ROCK = {
+  ridge:  mix(plainCol('ridge'),  EARTH, 0.55),
+  canopy: mix(plainCol('canopy'), EARTH, 0.55),
+  dune:   mix(plainCol('dune'),   EARTH, 0.55)
+};
+
+/* The depth the drawn sea starts at — the same point _sea projects for its
+   horizon, expressed as a grid depth rather than a pixel. Anything shallower
+   than this is sky, whatever form the country has. */
+const HORIZON = -1 - 2 * PAD;
+
+/* Where ambient shipping sails, as a grid depth (gx + gy).
+
+   A coast has its water across the front, so shipping is seaward of SHORE.
+   An island has water on every side, and its coastline runs right back to the
+   horizon — so its fleet sails in the strip between HORIZON and the land, and
+   is drawn before _island, which paints over whatever overlaps. Both cases are
+   open water no part of the town stands on. */
+const shipDepth = (form, i) =>
+  form === 'coast' ? SHORE + 2.2 + i * 1.6
+                   : HORIZON + 0.5 + i * 0.45;
+
+/* How far a vessel has to travel along u = (gx - gy) to cross the frame and
+   leave it at both ends. A grid point's screen x is ox + u*hw with ox = W/2,
+   so half the canvas is W/(2*hw) — NOT W/hw, which is the mistake that put
+   the fleet off-screen more than half the time and was invisible to every
+   assertion in this file. The 4 is a ship-length of margin, so a hull leaves
+   the frame completely before it wraps. */
+const shipSpan = (W, hw) => W / (2 * hw) + 4;
+
+CityView.HORIZON   = HORIZON;
+CityView.shipDepth = shipDepth;
+CityView.shipSpan  = shipSpan;
+
+/* Freight always arrives along one line, and it is one of the two roads the
+   city already has, so a lorry drives on tarmac. Position along it is a gx;
+   depth is therefore gx + LANE, which is what ties the dock to the shoreline. */
+const LANE = 6;
+
+/* Where freight stops — the position of its NOSE, not of its middle. Putting
+   a hull's centre on the waterline leaves its whole front half sitting on the
+   beach, which is what the first render of this animation showed.
+
+   On a coast the nose stops exactly on the waterline, so the hull is entirely
+   afloat and the porters step off onto sand.
+
+   An island has to clear its own coastline, and _coast lets that ring bulge to
+   R / max(|cos t|, |sin t|) rather than a flat R — so the obvious `N - 1 + PAD`
+   grounds the ship. 2 * PAD clears the widest ring the generator can produce
+   in LANE's direction.
+
+   Inland there is no water in the way, but there is still an edge: the lorry
+   has to come far enough in that its whole length is on ground the country
+   actually has. */
+const dockAt = (form) =>
+  form === 'coast'  ? SHORE - LANE          /* 7.4  — depth 13.4, the shoreline */
+: form === 'island' ? N - 1 + 2 * PAD       /* 10.4 — clear of the widest coastline */
+                    : N - 2.5;              /* 6.5  — whole lorry on the shelf */
+
+/* How far behind its nose a vehicle's drawn centre sits: half its length.
+   _vessel and _lorry both put the nose at +L along the heading, so this is
+   exactly the L each of them is drawn with at delivery size. */
+const noseOffset = (form) => form === 'inland' ? 0.85 * 1.1 : 1.5 * 1.15;
+
+CityView.LANE       = LANE;
+CityView.dockAt     = dockAt;
+CityView.noseOffset = noseOffset;
+
+/* Cargo colours. Materials are grey, Food green, Workers tan — the same three
+   everywhere, so a container on a deck and a sack on a porter's shoulder mean
+   the same thing. cargoList is the only thing that should read this. */
+const CARGO_COL = { W:'#d9b98a', M:'#9aa3ad', F:'#6fae5c' };
+
+/* What a trade actually looks like on the ground. Goods stay legible as goods:
+   tan figures for Workers, grey crates for Materials, green sacks for Food.
+   Workers arrive as PEOPLE, not boxes — that is the one substitution in this
+   scene a student would read as wrong.
+
+   Capped at 8. A forty-unit deal drawn honestly is a column of identical boxes
+   trudging up the road for twenty seconds, which reads as a glitch. */
+const cargoList = (res) => {
+  const out = [];
+  ['W', 'M', 'F'].forEach(k => {
+    const n = Math.floor(Math.max(0, (res && res[k]) || 0));
+    for (let i = 0; i < n; i++)
+      out.push({ res: k, col: CARGO_COL[k], person: k === 'W' });
+  });
+  return out.slice(0, 8);
+};
+CityView.cargoList = cargoList;
+
+/* Ambient shipping carries something, or the deck reads as empty. It is not a
+   real trade — those are drawn by deliver() — so the mix is just seeded, but
+   it goes through cargoList so ambient and delivered cargo cannot drift apart
+   in colour or shape. */
+const cargoStack = (rnd, n) => {
+  const res = { W:0, M:0, F:0 }, keys = ['W', 'M', 'F'];
+  for (let i = 0; i < n; i++) res[keys[Math.floor(rnd() * 3) % 3]]++;
+  return cargoList(res);
+};
+
+/* One delivery, as a pure function of how long it has been running.
+
+   Twenty seconds: long enough that a group looking up from their iPad still
+   catches it, short enough that a busy trading round does not become a queue
+   of ships. The three phases are the three sentences of the story — it
+   arrives, the goods come up the road, it leaves with what was paid.
+
+   `u` is the vessel's position along LANE, as a gx. It is clamped at `dock`
+   through the middle phase and never goes below it: landward of the dock is
+   the beach, and then somebody's factory.
+   `carry` is how much is still aboard; `walk` is how far the porters have got
+   from the dock towards the square. */
+const DELIVERY_SECS = 20;
+const D_IN = 6.5, D_UN = 7.0;                 /* the rest of the 20s is the departure */
+const D_OFF = 9;                              /* how far off the lane a vessel starts */
+const ease = (k) => k * k * (3 - 2 * k);      /* smoothstep, so it slows into the dock */
+
+const deliveryAt = (el, dock) => {
+  if (!(el >= 0) || el >= DELIVERY_SECS) return null;
+  if (el < D_IN)
+    return { phase:'in',     u: dock + D_OFF * (1 - ease(el / D_IN)), carry: 1, walk: 0 };
+  if (el < D_IN + D_UN) {
+    const k = (el - D_IN) / D_UN;
+    return { phase:'unload', u: dock, carry: 1 - k, walk: k };
+  }
+  const k = (el - D_IN - D_UN) / (DELIVERY_SECS - D_IN - D_UN);
+  return { phase:'out',      u: dock + D_OFF * ease(k), carry: 0, walk: 1 };
+};
+
+/* What is on the deck at a given moment. Three different answers, and getting
+   them from one expression is how the ship sailed away empty in the first
+   render of this: `carry` drains the INCOMING goods while the porters unload
+   them, and has nothing to say about the payment the ship leaves with. */
+const aboardAt = (s, inb, out) => {
+  if (!s) return [];
+  if (s.phase === 'in')     return inb;                                   /* full, arriving */
+  if (s.phase === 'unload') return inb.slice(0, Math.round(inb.length * s.carry));
+  return out;                                                            /* leaving, paid */
+};
+
+CityView.DELIVERY_SECS = DELIVERY_SECS;
+CityView.deliveryAt    = deliveryAt;
+CityView.aboardAt      = aboardAt;
+
+/* Bands are tuned in half-tiles, but the horizon sits only a few half-tiles
+   below the top of the frame at the aspect ratios this app actually uses, so
+   a band's crests can land off the top of the canvas — taking any snow line
+   derived from them with it. This scales a band's amplitude so its crest sits
+   just inside the frame. skyPx is how much sky there is above the horizon. */
+const bandFit = (skyPx, hh, band) => {
+  const full = hh * band.amp * (1 + band.rough);   /* crest rise above baseline */
+  const want = skyPx + hh * band.base;             /* room available, baseline-adjusted */
+  if (!(full > 0) || full <= want) return 1;
+  return Math.max(0.15, want / full);
+};
+/* exposed here rather than in the static group near WEATHER_FOR: this const is
+   declared below it in file order, so assigning it there throws on load. */
+CityView.bandFit = bandFit;
+
+/* A wavy horizontal line filling everything below it. Two sines so the edge
+   does not read as a single mechanical wave. */
+CityView.prototype._band = function (g, baseY, amp, freq, phase, rough) {
+  g.beginPath();
+  g.moveTo(-20, this.H + 20);
+  for (let x = -20; x <= this.W + 20; x += 6) {
+    const y = baseY - Math.sin(x * freq + phase) * amp
+                    - Math.sin(x * freq * 2.7 + phase * 1.7) * amp * rough;
+    g.lineTo(x, y);
+  }
+  g.lineTo(this.W + 20, this.H + 20);
+  g.closePath();
+};
+
+/* What lies beyond the country, whatever that is. Replaces the unconditional
+   sea. Island keeps _sea untouched so Green Isles cannot regress. */
+CityView.prototype._backdrop = function (g, night) {
+  const hy = this.iso(-0.5 - PAD, -0.5 - PAD).y;      /* same horizon _sea uses */
+
+  if (this.form === 'inland') {
+    const bands = surroundBands(this.surround);
+    /* scale every band in the set by the factor the FIRST (farthest, tallest)
+       one needs, so their relative depths are preserved */
+    const k = bandFit(hy - this.H * 0.06, this.hh, bands[0]);
+    bands.forEach(b => {
+      const A = this.hh * b.amp * k;
+      const baseY = hy + this.hh * b.base;
+      g.fillStyle = shade(b.col, night ? -0.5 : 0);
+      this._band(g, baseY, A, b.freq, b.phase, b.rough);
+      g.fill();
+      if (b.snow && !night) {
+        /* Snow is everything above a height, not a second band: two _band
+           curves that share a shape and differ by a constant offset never
+           cross, so clipping one against the other paints the entire ridge
+           rather than its peaks. Derived from the actual crest, not the
+           baseline, so it always lands inside the band's real vertical range:
+           some peaks rise above it, the troughs stay bare rock. */
+        const crest  = baseY - A * (1 + b.rough);
+        const snowY  = crest + (baseY - crest) * 0.42;
+        g.save();
+        this._band(g, baseY, A, b.freq, b.phase, b.rough);
+        g.clip();
+        /* One flat white plate read as a shape pasted onto the mountain. Four
+           faint plates instead, each higher and a little stronger, so the cover
+           thins out as it comes down and the rock shows through it near the
+           snow line. Slightly blue, because snow at that distance is. The
+           lowest plate is still snowY — the line the ridge is tuned around. */
+        const LIE = [[1.00, 0.20], [0.70, 0.26], [0.42, 0.34], [0.18, 0.44]];
+        for (let i = 0; i < LIE.length; i++) {
+          g.fillStyle = 'rgba(246,250,255,' + LIE[i][1] + ')';
+          g.fillRect(-20, 0, this.W + 40, crest + (snowY - crest) * LIE[i][0]);
+        }
+        g.restore();
+      }
+    });
+    this._plainCover(g, night, this.surround, this.H);
+    return;
+  }
+
+  if (this.form !== 'coast') {                        /* island, or no country yet */
+    this._sea(g, this.W, this.H, night);
+    return this._shipping(g, night);   /* behind the island, which paints over it */
+  }
+
+  /* coast — the country keeps going inland behind the town. The water in
+     front is drawn later, by _shore(), because it sits over the ground. */
+  const L = this.land || LAND_DEF;
+  const far = L.far || '#8fa86d';
+  g.fillStyle = shade(far, night ? -0.5 : 0.18);
+  this._band(g, hy - this.hh * 0.6, this.hh * 1.9, 0.0048, 1.7, 0.4); g.fill();
+  g.fillStyle = shade(far, night ? -0.5 : 0.06);
+  this._band(g, hy + this.hh * 0.7, this.hh * 1.1, 0.0071, 4.3, 0.35); g.fill();
+  g.fillStyle = shade(far, night ? -0.55 : -0.10);
+  this._band(g, hy + this.hh * 2.1, this.hh * 0.8, 0.0055, 2.4, 0.35); g.fill();
+
+  /* on a coast the cover has to stop at the water's edge, not run to the
+     bottom of the frame the way it does on an inland map */
+  this._plainCover(g, night, 'coastland', this.oy + (SHORE - 0.9) * this.hh);
+};
+
+/* Boulders inland of the Highlands, trees in the Forest Belt and behind a
+   coast, scrub on the Dry Plains. Skipped wherever the town occupies the
+   screen, so nothing draws over the built grid. The shapes are the existing
+   flora ones; only the placement is new. */
+CityView.prototype._plainCover = function (g, night, kind, botY) {
+  const c = this.iso(4, 4), rx = this.hw * 7.4, ry = this.hh * 7.4;
+  const r = mul32(hashStr('plain:' + kind));
+  const topY = this.iso(-0.5 - PAD, -0.5 - PAD).y + this.hh * 2.6;
+  if (botY <= topY) return;
+
+  for (let i = 0; i < 44; i++) {
+    const x = r() * (this.W + 160) - 80;
+    const y = topY + Math.pow(r(), 0.7) * (botY - topY);
+    const seed = r();
+    const dx = (x - c.x) / rx, dy = (y - c.y) / ry;
+    if (dx * dx + dy * dy < 1.06) continue;              /* behind the town */
+
+    const p = { x, y }, f = { seed, q: 0 };
+    g.save();
+    g.globalAlpha = 0.22; g.fillStyle = '#000';
+    g.beginPath();
+    g.ellipse(x + this.hw * 0.06, y + this.hh * 0.08, this.hw * 0.3, this.hh * 0.22, 0, 0, 7);
+    g.fill();
+    g.restore();
+
+    if (kind === 'ridge')      this._boulder(g, p, f, night);
+    else if (kind === 'dune')  this._scrub(g, p, f, night);
+    else                       this._tree(g, p, f, night);
+  }
+};
+
+/* ---------- sea behind the city ---------------------------------------- */
+CityView.prototype._sea = function (g, W, H, night) {
+  const horizon = this.iso(-0.5 - PAD, -0.5 - PAD).y;              /* behind the island */
+  const grd = g.createLinearGradient(0, horizon - 4, 0, H);
+  if (night) { grd.addColorStop(0, '#16274a'); grd.addColorStop(1, '#0d1a33'); }
+  else       { grd.addColorStop(0, '#3f97bd'); grd.addColorStop(1, '#1d5f85'); }
+  g.fillStyle = grd;
+  g.fillRect(0, horizon - 4, W, H - horizon + 8);
+
+  g.strokeStyle = night ? 'rgba(160,200,255,.16)' : 'rgba(255,255,255,.26)';
+  g.lineWidth = 1.3;
+  const step = Math.max(9, H * 0.045);
+  for (let y = horizon + 4; y < H; y += step) {
+    g.beginPath();
+    for (let x = 0; x <= W; x += 8)
+      g.lineTo(x, y + Math.sin(x * 0.04 + this.t * 1.1 + y * 0.05) * 1.8);
+    g.stroke();
+  }
+
+};
+
+/* trace the coastline. grass=true walks the inner (grass) ring instead of the shore */
+CityView.prototype._coastPath = function (g, grass, dy, k) {
+  const c = this.coast, cx = (N - 1) / 2, cy = (N - 1) / 2, s = k || 1;
+  g.beginPath();
+  for (let i = 0; i < c.length; i++) {
+    const ax = grass ? c[i].hx : c[i].gx, ay = grass ? c[i].hy : c[i].gy;
+    const p = this.iso(cx + (ax - cx) * s, cy + (ay - cy) * s);
+    if (i === 0) g.moveTo(p.x, p.y + dy); else g.lineTo(p.x, p.y + dy);
+  }
+  g.closePath();
+};
+
+/* the island the whole country sits on */
+CityView.prototype._island = function (g, night) {
+  if (!this.coast) return;
+
+  const green = clamp(this.m.G / 100, 0, 1);
+  const gcol = this.weather === 'drought' ? '#b09657' : green > 0.5 ? '#4e8f4a' : '#6f8a44';
+
+  /* a coast has no ring of surf, shelf or beach — _shore draws its water */
+  if (this.form === 'coast') {
+    g.fillStyle = shade((this.land || LAND_DEF).sand, night ? -0.4 : 0.05);
+    this._coastPath(g, false, 0); g.fill();
+    g.fillStyle = shade(gcol, night ? -0.5 : 0);
+    this._coastPath(g, true, 0); g.fill();
+    return;
+  }
+
+  /* inland: a short shelf of earth and rock. No shallows, no reef, no foam,
+     no beach — there is no water anywhere on this map to have a shore for. */
+  if (this.form === 'inland') {
+    const rock  = SHELF_ROCK[this.surround] || SHELF_ROCK.ridge;
+    const plain = plainCol(this.surround);
+    const drop  = this.hh * 1.0;
+
+    /* The drop used to be a wall: four offset copies of the outline at a fixed
+       height, so the town read as a tray set down on the plain rather than as
+       part of it. Three things fix that, painted outward in.
+
+       First, a halo — a few wide, very faint rings of shaded ground lying flat
+       around the foot. Nothing in the world stops dead at a line; this is the
+       ground darkening as it runs up to the rise. */
+    g.save();
+    const HALO = [[1.135, 0.045], [1.100, 0.050], [1.070, 0.055], [1.042, 0.060]];
+    for (let i = 0; i < HALO.length; i++) {
+      g.globalAlpha = HALO[i][1] * (night ? 0.55 : 1);
+      g.fillStyle = shade(plain, night ? -0.60 : -0.30);
+      this._coastPath(g, false, drop * 1.02, HALO[i][0]); g.fill();
+    }
+    g.restore();
+
+    /* Second, a talus rather than a cliff: each ring in from the foot sits both
+       higher and narrower, so the copies stack into a slope instead of a face.
+       Third, the colour walks with them — the plain's own hue in shadow at the
+       bottom, the country's earth in daylight at the top. Ground meeting
+       ground. */
+    const STEPS = 9;
+    for (let i = 0; i < STEPS; i++) {
+      const f = i / (STEPS - 1);                   /* 0 at the foot, 1 at the top */
+      const col = mix(plain, rock, f);
+      const lit = -0.30 + 0.40 * f * f;            /* shadow low down, sun on top */
+      g.fillStyle = night ? shade('#3f4352', lit * 0.5) : shade(col, lit);
+      this._coastPath(g, false, drop * (1 - f), 1 + 0.055 * (1 - f)); g.fill();
+    }
+
+    /* the flat lip the town's own grass sits on, lit like the top of the slope */
+    g.fillStyle = night ? '#4a5163' : shade(rock, 0.10);
+    this._coastPath(g, false, 0); g.fill();
+    g.fillStyle = shade(gcol, night ? -0.5 : 0);
+    this._coastPath(g, true, 0); g.fill();
+    return;
+  }
+
+  const thick = this.hh * THICK;
+  const L = this.land || LAND_DEF;
+
+  /* the shallow shelf — pale turquoise water you can wade out into.
+     many faint rings instead of two solid plates, so the edge feathers away */
+  g.save();
+  const SHELF = [[1.30, 0.14], [1.25, 0.15], [1.20, 0.17], [1.155, 0.19],
+                 [1.115, 0.21], [1.080, 0.23], [1.050, 0.25], [1.025, 0.27]];
+  for (let i = 0; i < SHELF.length; i++) {
+    const k = SHELF[i][0], f = i / (SHELF.length - 1);
+    g.globalAlpha = SHELF[i][1] * (night ? 0.55 : 1);
+    g.fillStyle = night ? (f > 0.5 ? '#41608a' : '#33506f')
+                        : (f > 0.5 ? '#b6e9e2' : '#6cc4d6');
+    this._coastPath(g, false, thick * (0.34 - 0.22 * f), k); g.fill();
+  }
+  g.restore();
+
+  /* a thin dark reef line at the very bottom — the shore above it is all sand */
+  g.fillStyle = night ? '#232a3a' : '#6b6150';
+  this._coastPath(g, false, thick); g.fill();
+
+  /* the shore face, graded from wet sand at the water up to dry sand on top */
+  const FACE = [[0.90, -0.44], [0.74, -0.36], [0.58, -0.29], [0.44, -0.23],
+                [0.32, -0.17], [0.21, -0.12], [0.11, -0.06]];
+  for (let i = 0; i < FACE.length; i++) {
+    g.fillStyle = night ? shade('#41485e', FACE[i][1] * 0.5) : shade(L.sand, FACE[i][1]);
+    this._coastPath(g, false, thick * FACE[i][0]); g.fill();
+  }
+
+  /* the beach itself */
+  g.fillStyle = night ? '#4a5163' : L.sand;
+  this._coastPath(g, false, 0); g.fill();
+
+  /* foam washing in and out */
+  const wash = 1 + Math.sin(this.t * 0.9) * 0.006;
+  g.save();
+  g.globalAlpha = night ? 0.30 : 0.62;
+  g.strokeStyle = '#ffffff'; g.lineWidth = Math.max(1.6, this.hh * 0.22);
+  this._coastPath(g, false, thick * 0.06, wash); g.stroke();
+  g.globalAlpha = night ? 0.14 : 0.30;
+  g.lineWidth = Math.max(1, this.hh * 0.12);
+  this._coastPath(g, false, thick * 0.16, 1 + Math.sin(this.t * 0.9 + 1.7) * 0.008); g.stroke();
+  g.restore();
+
+  /* grass shelf between the beach and the built grid */
+  g.fillStyle = shade(gcol, night ? -0.5 : 0);
+  this._coastPath(g, true, 0); g.fill();
+  g.save();                                        /* a soft, uneven grass edge */
+  g.globalAlpha = 0.35;
+  g.strokeStyle = shade(gcol, night ? -0.6 : -0.16);
+  g.lineWidth = Math.max(2, this.hh * 0.34);
+  this._coastPath(g, true, 0); g.stroke();
+  g.restore();
+
+  if (this.jetty) this._jetty(g, night);
+};
+
+/* a timber jetty running out into the water — port and island homelands */
+CityView.prototype._jetty = function (g, night) {
+  const c = this.coast, pt = c[this.jetty.seg % c.length];
+  const cx = (N - 1) / 2, cy = (N - 1) / 2;
+  const dx = pt.gx - cx, dy = pt.gy - cy, d = Math.hypot(dx, dy) || 1;
+  const a = this.iso(cx + dx * 0.99, cy + dy * 0.99);
+  const b = this.iso(cx + dx / d * (d + this.jetty.len), cy + dy / d * (d + this.jetty.len));
+  const w = Math.max(2.5, this.hw * 0.16);
+  g.save();
+  g.strokeStyle = night ? '#3b3225' : '#7d6144';
+  g.lineWidth = w * 2.2; g.lineCap = 'butt';
+  g.beginPath(); g.moveTo(a.x, a.y + this.hh * 0.5); g.lineTo(b.x, b.y + this.hh * 0.5); g.stroke();
+  g.strokeStyle = night ? '#584c39' : '#a8855c';
+  g.lineWidth = w * 1.6;
+  g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+  g.restore();
+};
+
+/* The water in front of a coastal country. SHORE is a grid depth, so the
+   shoreline projects to a horizontal-ish line: one wavy band, land above,
+   water below. Drawn after _ground because it covers the front of the grid. */
+CityView.prototype._shore = function (g, night) {
+  const L = this.land || LAND_DEF;
+  const seaY  = this.oy + SHORE * this.hh;
+  const sandY = seaY - this.hh * 0.9;
+  const W = this.W, H = this.H;
+
+  /* beach */
+  g.fillStyle = night ? '#4a5163' : L.sand;
+  this._band(g, sandY, this.hh * 0.55, 0.0062, 1.9, 0.4); g.fill();
+
+  if (this.channels) this._channels(g, night);
+  if (this.harbour)  this._harbour(g, night, seaY);
+
+  /* the sea */
+  const grd = g.createLinearGradient(0, seaY, 0, H);
+  if (night) { grd.addColorStop(0, '#2b4368'); grd.addColorStop(1, '#0d1a33'); }
+  else       { grd.addColorStop(0, '#5b8cb4'); grd.addColorStop(1, '#27506f'); }
+  g.save();
+  this._band(g, seaY, this.hh * 0.55, 0.0062, 1.9, 0.4);
+  g.fillStyle = grd; g.fill();
+  g.clip();
+  g.strokeStyle = night ? 'rgba(160,200,255,.16)' : 'rgba(255,255,255,.15)';
+  g.lineWidth = 1.1;
+  for (let y = seaY; y < H; y += Math.max(9, (y - seaY) * 0.16)) {
+    g.beginPath();
+    for (let x = 0; x <= W; x += 10)
+      g.lineTo(x, y + Math.sin(x * 0.035 + this.t * 1.1 + y * 0.05) * 1.9);
+    g.stroke();
+  }
+  g.restore();
+
+  /* surf, riding the same wave the shoreline was cut with */
+  g.save();
+  g.globalAlpha = night ? 0.3 : 0.55;
+  g.strokeStyle = '#ffffff'; g.lineWidth = 2;
+  g.beginPath();
+  for (let x = 0; x <= W; x += 6)
+    g.lineTo(x, seaY - Math.sin(x * 0.0062 + 1.9) * this.hh * 0.55
+                     - Math.sin(x * 0.0062 * 2.7 + 1.9 * 1.7) * this.hh * 0.22
+                     + Math.sin(this.t * 1.6) * 1.4);
+  g.stroke();
+  g.restore();
+
+  if (this.jetty && this.harbour) this._harbourJetty(g, night, seaY);
+};
+
+/* Two river mouths running out of the land into the sea, flanking the town.
+   Drawn over the beach and under the sea, so the bottom of each channel is
+   covered by the water it runs into. */
+CityView.prototype._channels = function (g, night) {
+  const yTop = this.iso(-0.5 - PAD, -0.5 - PAD).y + this.hh * 2.2;
+  const yBot = this.oy + (SHORE + 3.0) * this.hh;
+  const yMid = (yTop + yBot) / 2;
+  const L = this.land || LAND_DEF;
+
+  [-1, 1].forEach(side => {
+    const cTop = this.ox + side * this.hw * 6.2;
+    const cMid = this.ox + side * this.hw * 7.4;
+    const cBot = this.ox + side * this.hw * 9.9;
+    const wTop = this.hw * 0.5, wMid = this.hw * 1.15, wBot = this.hw * 2.5;
+    g.beginPath();
+    g.moveTo(cTop - wTop, yTop);
+    g.quadraticCurveTo(cMid - wMid, yMid, cBot - wBot, yBot);
+    g.lineTo(cBot + wBot, yBot);
+    g.quadraticCurveTo(cMid + wMid, yMid, cTop + wTop, yTop);
+    g.closePath();
+    g.fillStyle = night ? '#27405f' : '#4b7ea6'; g.fill();
+    g.strokeStyle = shade(L.sand, night ? -0.45 : -0.06); g.lineWidth = 3; g.stroke();
+  });
+};
+
+/* The harbour inlet, as a plain box so it can be asserted without a canvas.
+   `cx` is an offset from the view centre (this.ox), not an absolute x; `cy` is
+   absolute. It MUST cross seaY: entirely on the land side it reads as a
+   lagoon, entirely below it and there is no inlet at all. */
+const harbourBox = (seaY, hw, hh) => ({
+  cx: hw * 1.6, cy: seaY - hh * 0.3, rx: hw * 2.6, ry: hh * 2.9
+});
+/* Exported here, not with the other CityView statics near the top of the
+   file — this `const` is declared here, and assigning it up there would
+   read the binding inside its temporal dead zone and throw on load. */
+CityView.harbourBox = harbourBox;
+
+CityView.prototype._harbour = function (g, night, seaY) {
+  const b = harbourBox(seaY, this.hw, this.hh);
+  const L = this.land || LAND_DEF;
+  g.fillStyle = night ? '#27405f' : '#3d6d97';
+  g.beginPath(); g.ellipse(this.ox + b.cx, b.cy, b.rx, b.ry, 0, 0, 7); g.fill();
+  g.strokeStyle = shade(L.sand, night ? -0.45 : -0.1); g.lineWidth = 3;
+  g.beginPath(); g.ellipse(this.ox + b.cx, b.cy, b.rx, b.ry, 0, 0, 7); g.stroke();
+};
+
+/* A timber jetty running out into the inlet. The ring-anchored _jetty is
+   wrong on a coast: its landward end lands seaward of SHORE on every seed,
+   leaving a pier joined to nothing. The harbour carries it instead. */
+CityView.prototype._harbourJetty = function (g, night, seaY) {
+  const b = harbourBox(seaY, this.hw, this.hh);
+  const x  = this.ox + b.cx;
+  const y0 = b.cy - b.ry * 0.78, y1 = b.cy + b.ry * 0.42;
+  const w  = Math.max(2.5, this.hw * 0.16);
+  g.save();
+  g.lineCap = 'butt';
+  g.strokeStyle = night ? '#3b3225' : '#7d6144';
+  g.lineWidth = w * 2.2;
+  g.beginPath(); g.moveTo(x, y0 + this.hh * 0.5); g.lineTo(x, y1 + this.hh * 0.5); g.stroke();
+  g.strokeStyle = night ? '#584c39' : '#a8855c';
+  g.lineWidth = w * 1.6;
+  g.beginPath(); g.moveTo(x, y0); g.lineTo(x, y1); g.stroke();
+  g.restore();
+};
+
+/* ---------- ground: grass, roads, plaza --------------------------------- */
+CityView.prototype._ground = function (g, night) {
+  const dry = this.weather === 'drought' ? 1 : 0;
+  const green = clamp(this.m.G / 100, 0, 1);
+  const grassA = dry ? '#b09657' : shade(green > 0.5 ? '#4e8f4a' : '#6f8a44', night ? -0.5 : 0);
+  const grassB = dry ? '#9b8149' : shade(green > 0.5 ? '#437c40' : '#5f783a', night ? -0.5 : 0);
+  const roadC  = night ? '#232c3d' : '#4d5262';
+  const plazaC = night ? '#3a4256' : shade('#b9b3a4', 0);
+
+  for (let x = 0; x < N; x++) for (let y = 0; y < N; y++) {
+    const p = this.iso(x, y);
+    let col = (x + y) % 2 ? grassA : grassB;
+    if (isRoad(x, y))  col = roadC;
+    if (isPlaza(x, y)) col = plazaC;
+    this._diamond(g, p, 0, col);
+  }
+
+  /* road markings */
+  g.strokeStyle = night ? 'rgba(255,235,160,.35)' : 'rgba(255,255,255,.42)';
+  g.setLineDash([Math.max(4, this.hw * 0.18), Math.max(5, this.hw * 0.22)]);
+  g.lineWidth = 1.6;
+  ROADX.forEach(l => { const a = this.iso(l, -0.5), b = this.iso(l, N - 0.5);
+    g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); });
+  ROADY.forEach(l => { const a = this.iso(-0.5, l), b = this.iso(N - 0.5, l);
+    g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); });
+  g.setLineDash([]);
+
+  /* the harmony square: a warm circle when united, fences when divided */
+  const unity = clamp((this.m.H - 28) / 52, 0, 1);
+  const c = this.iso(4, 4);
+  if (unity > 0.45) {
+    g.save();
+    g.globalAlpha = (unity - 0.45) * 1.5;
+    const gr = g.createRadialGradient(c.x, c.y, 2, c.x, c.y, this.hw * 2.2);
+    gr.addColorStop(0, 'rgba(255,214,120,.55)'); gr.addColorStop(1, 'rgba(255,214,120,0)');
+    g.fillStyle = gr;
+    g.beginPath(); g.ellipse(c.x, c.y, this.hw * 2.2, this.hh * 2.2, 0, 0, 7); g.fill();
+    g.restore();
+  } else {
+    g.save();
+    g.globalAlpha = (0.45 - unity) * 1.8;
+    g.strokeStyle = '#c9553f'; g.lineWidth = 1.6; g.setLineDash([4, 4]);
+    [[3.9, 2.6, 3.9, 5.4], [2.6, 4.2, 5.4, 4.2]].forEach(l => {
+      const a = this.iso(l[0], l[1]), b = this.iso(l[2], l[3]);
+      g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+    });
+    g.setLineDash([]); g.restore();
+  }
+};
+
+CityView.prototype._diamond = function (g, p, lift, col, stroke) {
+  const hw = this.hw, hh = this.hh, y = p.y - lift;
+  g.fillStyle = col;
+  g.beginPath();
+  g.moveTo(p.x, y - hh); g.lineTo(p.x + hw, y);
+  g.lineTo(p.x, y + hh);  g.lineTo(p.x - hw, y);
+  g.closePath(); g.fill();
+  if (stroke) { g.strokeStyle = stroke; g.lineWidth = 1; g.stroke(); }
+};
+
+/* ---------- one building ------------------------------------------------ */
+CityView.prototype._building = function (g, b, night) {
+  const K = KIND[b.kind] || KIND.home;
+  const p = this.iso(b.x, b.y);
+  const hw = this.hw * 0.78, hh = this.hh * 0.78;
+  const unit = this.hh * 1.15;
+  const h = Math.max(0, b.h) * unit;
+  const dark = night ? -0.45 : 0;
+
+  if (K.field)   return this._farm(g, p, night);
+  if (K.tree)    return this._tree(g, p, b, night);
+  if (K.pit)     return this._mine(g, p, b, night);
+  if (K.obelisk) return this._monument(g, night);
+
+  const top   = shade(K.top,   dark);
+  const left  = shade(K.left,  dark - 0.05);
+  const right = shade(K.right, dark - 0.05);
+
+  /* shadow */
+  g.save();
+  g.globalAlpha = night ? 0.22 : 0.16;
+  g.fillStyle = '#000';
+  g.beginPath();
+  g.ellipse(p.x + hw * 0.25, p.y + hh * 0.4, hw * 0.95, hh * 0.8, 0, 0, 7);
+  g.fill(); g.restore();
+
+  if (h < 1.5) {                                     /* rubble */
+    g.fillStyle = shade('#6b6257', dark);
+    g.beginPath();
+    g.moveTo(p.x - hw * 0.7, p.y); g.lineTo(p.x, p.y - hh * 0.5);
+    g.lineTo(p.x + hw * 0.7, p.y); g.lineTo(p.x, p.y + hh * 0.7);
+    g.closePath(); g.fill();
+    return;
+  }
+
+  this._box(g, p, hw, hh, h, top, left, right);
+  if (K.camo) this._camo(g, p, hw, hh, h, b, dark);
+
+  /* windows — lit at night, dark when the country has stalled */
+  if (K.win) {
+    const rows = Math.max(1, Math.floor(h / (unit * 0.55)));
+    const lit  = night ? clamp(this.m.E / 100, 0.15, 1) : 0;
+    const onCol  = K.glass ? '#bfe4ff' : '#ffe08a';
+    const offCol = night ? shade(K.left, -0.35) : 'rgba(255,255,255,.20)';
+    for (let r = 0; r < rows; r++) {
+      const v = (r + 0.55) * (h / rows);
+      for (let i = 0; i < 2; i++) {
+        const u = 0.26 + i * 0.36;
+        const on = ((b.seed * 977 + r * 13 + i * 7) % 1) < lit;
+        const col = night ? (on ? onCol : offCol) : offCol;
+        this._face(g, p.x - hw, p.y, hw, hh, u, v, 0.2, unit * 0.24, col);   /* left  */
+        this._face(g, p.x + hw, p.y, -hw, hh, u, v, 0.2, unit * 0.24, col);  /* right */
+      }
+    }
+  }
+
+  /* cracks appear as stability falls */
+  if (b.crack > 0.25 && h > 2) {
+    g.save();
+    g.globalAlpha = clamp((b.crack - 0.25) * 1.6, 0, 0.85);
+    g.strokeStyle = '#2a1d18'; g.lineWidth = 1.3;
+    g.beginPath();
+    g.moveTo(p.x, p.y + hh - h * 0.05);
+    g.lineTo(p.x - hw * 0.35, p.y - h * 0.35);
+    g.lineTo(p.x - hw * 0.15, p.y - h * 0.6);
+    g.stroke(); g.restore();
+  }
+
+  /* roof furniture */
+  const ty = p.y - h;
+  if (K.stack) {                                     /* factory chimney */
+    g.fillStyle = shade('#8d939c', dark);
+    g.fillRect(p.x + hw * 0.18, ty - hh * 1.5, Math.max(3, hw * 0.16), hh * 1.6);
+    g.fillStyle = shade('#c0454a', dark);
+    g.fillRect(p.x + hw * 0.18, ty - hh * 1.5, Math.max(3, hw * 0.16), hh * 0.3);
+  }
+  if (K.dome) {
+    g.fillStyle = shade('#f2d789', dark);
+    g.beginPath(); g.ellipse(p.x, ty - hh * 0.2, hw * 0.5, hh * 0.75, 0, Math.PI, 0); g.fill();
+  }
+  if (K.spire) {
+    g.fillStyle = shade('#d8ae43', dark);
+    g.beginPath();
+    g.moveTo(p.x, ty - hh * 2.1); g.lineTo(p.x + hw * 0.28, ty + hh * 0.2);
+    g.lineTo(p.x - hw * 0.28, ty + hh * 0.2); g.closePath(); g.fill();
+  }
+  if (K.cross) {
+    g.fillStyle = '#d8455a';
+    g.fillRect(p.x - hw * 0.07, ty - hh * 0.95, hw * 0.14, hh * 0.9);
+    g.fillRect(p.x - hw * 0.28, ty - hh * 0.72, hw * 0.56, hh * 0.24);
+  }
+  if (K.crane) {
+    g.strokeStyle = shade('#e0a63c', dark); g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(p.x - hw * 0.3, ty + hh * 0.2); g.lineTo(p.x - hw * 0.3, ty - hh * 2.4);
+    g.lineTo(p.x + hw * 0.75, ty - hh * 2.1); g.stroke();
+  }
+  if (K.bay) {                                     /* freight shed: a roller door */
+    const bw = hw * 0.34, bh = hh * 0.62;   /* the locally scaled 0.78x pair, like every sibling */
+    g.fillStyle = shade('#4a4335', dark);
+    g.fillRect(p.x - bw / 2, p.y - bh * 0.2, bw, bh);
+    g.strokeStyle = shade('#d0c3a2', dark); g.lineWidth = 1.2;
+    for (let i = 1; i < 4; i++) {
+      const yy = p.y - bh * 0.2 + bh * (i / 4);
+      g.beginPath(); g.moveTo(p.x - bw / 2, yy); g.lineTo(p.x + bw / 2, yy); g.stroke();
+    }
+  }
+
+  /* ---- the bank: columns and a gold $ sign over the door ---- */
+  if (K.money) {
+    g.fillStyle = shade('#f6efd8', dark);                      /* portico */
+    for (let i = -1; i <= 1; i++)
+      g.fillRect(p.x - hw + hw * 0.22 + i * hw * 0.3, p.y - hh * 0.1 - unit * 0.85,
+                 Math.max(1.6, hw * 0.1), unit * 0.85);
+    const r = Math.max(6, hw * 0.44), sy = ty - hh * 0.6 - r;
+    g.strokeStyle = shade('#a8781a', dark); g.lineWidth = Math.max(1.4, hw * 0.07);
+    g.beginPath(); g.moveTo(p.x, ty + hh * 0.2); g.lineTo(p.x, sy); g.stroke();
+    g.fillStyle = shade('#e8b430', dark);
+    g.beginPath(); g.arc(p.x, sy, r, 0, 7); g.fill();
+    g.strokeStyle = shade('#a8781a', dark); g.lineWidth = 1.4; g.stroke();
+    g.fillStyle = night ? '#3a2f12' : '#4a3a10';
+    g.font = 'bold ' + Math.round(r * 1.5) + 'px -apple-system,Segoe UI,Roboto,sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('$', p.x, sy + r * 0.06);
+    g.textAlign = 'start'; g.textBaseline = 'alphabetic';
+  }
+
+  /* ---- the university: a clock tower that actually keeps time ---- */
+  if (K.clock) {
+    const tw = hw * 0.44, th = hh * 0.44, tH = unit * 1.5;
+    const tp = { x: p.x - hw * 0.34, y: ty + hh * 0.34 };
+    this._box(g, tp, tw, th, tH, shade('#e6d3c1', dark),
+              shade('#bd9179', dark - 0.05), shade('#8f6a58', dark - 0.05));
+    g.fillStyle = shade('#8d4a3a', dark);                        /* little spire */
+    g.beginPath();
+    g.moveTo(tp.x, tp.y - tH - th * 1.6);
+    g.lineTo(tp.x + tw * 1.1, tp.y - tH - th * 0.15);
+    g.lineTo(tp.x - tw * 1.1, tp.y - tH - th * 0.15);
+    g.closePath(); g.fill();
+    const cy2 = tp.y - tH + th * 0.75, cr = Math.max(4.5, tw * 0.72);
+    g.fillStyle = shade('#fbf6ea', dark);
+    g.beginPath(); g.arc(tp.x, cy2, cr, 0, 7); g.fill();
+    g.strokeStyle = shade('#6d4b3c', dark); g.lineWidth = 1.2; g.stroke();
+    const mins = this.t * 0.5;
+    g.strokeStyle = '#3a2a22'; g.lineWidth = Math.max(1.3, cr * 0.18);
+    g.beginPath(); g.moveTo(tp.x, cy2);
+    g.lineTo(tp.x + Math.sin(mins) * cr * 0.8, cy2 - Math.cos(mins) * cr * 0.8); g.stroke();
+    g.beginPath(); g.moveTo(tp.x, cy2);
+    g.lineTo(tp.x + Math.sin(mins / 12) * cr * 0.5, cy2 - Math.cos(mins / 12) * cr * 0.5); g.stroke();
+  }
+
+  /* ---- the cultural centre: a concert-hall shell, everybody's building ---- */
+  if (K.arts) {
+    const dw = hw * 0.94, dh = hh * 2.0, dy = ty + hh * 0.16;
+    g.fillStyle = shade('#a7b6bd', dark);                        /* the shell */
+    g.beginPath(); g.ellipse(p.x, dy, dw, dh, 0, Math.PI, 0); g.fill();
+    g.fillStyle = shade('#dae5e9', dark);                        /* its lit side */
+    g.beginPath(); g.ellipse(p.x, dy, dw, dh, 0, Math.PI, Math.PI * 1.5); g.fill();
+
+    g.save();                                                    /* the ribs of the roof */
+    g.beginPath(); g.ellipse(p.x, dy, dw, dh, 0, Math.PI, 0); g.clip();
+    g.strokeStyle = shade('#8399a2', dark); g.lineWidth = Math.max(1, hw * 0.045);
+    for (let i = -2; i <= 2; i++) {
+      g.beginPath();
+      g.moveTo(p.x + i * dw * 0.42, dy);
+      g.quadraticCurveTo(p.x + i * dw * 0.30, dy - dh * 0.86, p.x, dy - dh);
+      g.stroke();
+    }
+    g.restore();
+
+    /* the glass foyer, warm and full of people after dark */
+    g.fillStyle = night ? 'rgba(255,214,128,.85)' : 'rgba(196,228,246,.9)';
+    g.fillRect(p.x - hw * 0.68, dy - hh * 0.1, hw * 1.36, Math.max(2, hh * 0.34));
+
+    /* the national flag over the door — one flag for everyone who uses the hall */
+    const wave = Math.sin(this.t * 2.2) * hh * 0.12;
+    const fx = p.x + hw * 0.62, fy = dy - dh * 0.52;
+    g.strokeStyle = shade('#9aa3a8', dark); g.lineWidth = Math.max(1.2, hw * 0.05);
+    g.beginPath(); g.moveTo(fx, fy); g.lineTo(fx, fy - hh * 1.5); g.stroke();
+    g.fillStyle = shade((this.country && this.country.c2) || '#f4c542', dark);
+    g.beginPath();
+    g.moveTo(fx, fy - hh * 1.5);
+    g.quadraticCurveTo(fx + hw * 0.3, fy - hh * 1.5 + wave, fx + hw * 0.58, fy - hh * 1.42);
+    g.lineTo(fx + hw * 0.58, fy - hh * 1.0);
+    g.quadraticCurveTo(fx + hw * 0.3, fy - hh * 1.08 + wave, fx, fy - hh * 1.02);
+    g.closePath(); g.fill();
+  }
+
+  /* ---- the airbase: a helipad on the hangar and a helicopter over it ---- */
+  if (K.heli) {
+    const py = ty - hh * 0.05;
+    g.fillStyle = shade('#3c4234', dark);                        /* the pad */
+    g.beginPath(); g.ellipse(p.x, py, hw * 0.66, hh * 0.66, 0, 0, 7); g.fill();
+    g.strokeStyle = shade('#e9e6d2', dark); g.lineWidth = Math.max(1, hw * 0.055);
+    g.beginPath(); g.ellipse(p.x, py, hw * 0.48, hh * 0.48, 0, 0, 7); g.stroke();
+    g.fillStyle = shade('#e9e6d2', dark);                        /* the H */
+    const bw = Math.max(1.2, hw * 0.07);
+    g.fillRect(p.x - hw * 0.22, py - hh * 0.2, bw, hh * 0.4);
+    g.fillRect(p.x + hw * 0.15, py - hh * 0.2, bw, hh * 0.4);
+    g.fillRect(p.x - hw * 0.22, py - hh * 0.06, hw * 0.37, Math.max(1.2, hh * 0.1));
+
+    /* it hovers just off the pad, and its shadow keeps it tied to the roof */
+    const bob = Math.sin(this.t * 0.8);
+    const hx  = p.x - hw * 0.10;
+    const cy2 = py - hh * 1.15 - bob * hh * 0.28;
+    g.save();
+    g.globalAlpha = 0.26 - bob * 0.05;
+    g.fillStyle = '#101408';
+    g.beginPath();
+    g.ellipse(hx, py + hh * 0.05, hw * (0.40 - bob * 0.03), hh * (0.28 - bob * 0.02), 0, 0, 7);
+    g.fill(); g.restore();
+
+    g.strokeStyle = shade('#3c452f', dark); g.lineWidth = Math.max(1.4, hw * 0.06);
+    g.beginPath();                                               /* skids */
+    g.moveTo(hx - hw * 0.46, cy2 + hh * 0.72); g.lineTo(hx + hw * 0.42, cy2 + hh * 0.52);
+    g.stroke();
+    g.beginPath();                                               /* skid struts */
+    g.moveTo(hx - hw * 0.22, cy2 + hh * 0.30); g.lineTo(hx - hw * 0.26, cy2 + hh * 0.66);
+    g.moveTo(hx + hw * 0.20, cy2 + hh * 0.26); g.lineTo(hx + hw * 0.24, cy2 + hh * 0.60);
+    g.stroke();
+
+    g.strokeStyle = shade('#4a5540', dark); g.lineWidth = Math.max(2, hw * 0.15);
+    g.beginPath();                                               /* tail boom */
+    g.moveTo(hx + hw * 0.30, cy2 - hh * 0.10);
+    g.lineTo(hx + hw * 1.02, cy2 - hh * 0.34); g.stroke();
+    g.lineWidth = Math.max(1.4, hw * 0.09);
+    g.beginPath();                                               /* tail fin */
+    g.moveTo(hx + hw * 0.94, cy2 - hh * 0.20);
+    g.lineTo(hx + hw * 1.04, cy2 - hh * 0.76); g.stroke();
+
+    g.fillStyle = shade('#67754f', dark);                        /* body */
+    g.beginPath(); g.ellipse(hx, cy2, hw * 0.58, hh * 0.70, 0, 0, 7); g.fill();
+    g.fillStyle = night ? 'rgba(170,215,255,.65)' : 'rgba(200,236,255,.92)';
+    g.beginPath();                                               /* canopy */
+    g.ellipse(hx - hw * 0.26, cy2 - hh * 0.10, hw * 0.26, hh * 0.32, 0, 0, 7); g.fill();
+    g.fillStyle = shade('#8d9678', dark);                        /* rotor mast */
+    g.fillRect(hx - Math.max(1, hw * 0.06), cy2 - hh * 0.92,
+               Math.max(2, hw * 0.12), hh * 0.34);
+
+    /* the main rotor: a translucent disc with two blades still just visible in it */
+    const rw = hw * 1.15, rh2 = hh * 0.30, ry = cy2 - hh * 0.94;
+    g.save();
+    g.globalAlpha = night ? 0.26 : 0.38;
+    g.fillStyle = shade('#c9cfb4', dark);
+    g.beginPath(); g.ellipse(hx, ry, rw, rh2, 0, 0, 7); g.fill();
+    g.globalAlpha = 0.55;
+    g.strokeStyle = shade('#cfd5bd', dark); g.lineWidth = Math.max(1.2, hh * 0.09);
+    for (let bl = 0; bl < 2; bl++) {
+      const a = this.t * 9 + bl * Math.PI;
+      g.beginPath();
+      g.moveTo(hx, ry);
+      g.lineTo(hx + Math.cos(a) * rw, ry + Math.sin(a) * rh2);
+      g.stroke();
+    }
+    g.restore();
+
+    /* the tail rotor, and the red beacon under the nose */
+    g.save();
+    g.globalAlpha = 0.5;
+    g.strokeStyle = shade('#cfd5bd', dark); g.lineWidth = Math.max(1, hw * 0.05);
+    g.beginPath();
+    g.ellipse(hx + hw * 1.02, cy2 - hh * 0.44, hw * 0.10, hh * 0.30, 0, 0, 7);
+    g.stroke(); g.restore();
+    g.fillStyle = Math.sin(this.t * 3) > 0 ? '#ff5f4d' : shade('#7d3a32', dark);
+    g.beginPath();                                               /* the beacon */
+    g.arc(hx - hw * 0.40, cy2 + hh * 0.24, Math.max(1.3, hw * 0.07), 0, 7); g.fill();
+  }
+
+  /* ---- the barracks: a radar dish sweeping the sky ---- */
+  if (K.radar) {
+    const mx = p.x + hw * 0.35, my = ty - hh * 0.2, mh = unit * 0.55;
+    g.strokeStyle = shade('#5a6049', dark); g.lineWidth = Math.max(1.6, hw * 0.08);
+    g.beginPath(); g.moveTo(mx, my); g.lineTo(mx, my - mh); g.stroke();
+    const a = this.t * 1.1, sq = Math.cos(a);
+    g.save(); g.translate(mx, my - mh);
+    g.fillStyle = shade('#cdd3c0', dark);
+    g.beginPath();
+    g.ellipse(sq * hw * 0.2, 0, Math.max(2, hw * 0.3 * Math.abs(sq) + hw * 0.06),
+              Math.max(2.5, hh * 0.55), 0, 0, 7);
+    g.fill(); g.restore();
+    g.fillStyle = shade('#3f4634', dark);                          /* sandbags */
+    for (let i = -1; i <= 1; i++) {
+      g.beginPath();
+      g.ellipse(p.x - hw * 0.4 + i * hw * 0.3, p.y + hh * 0.18,
+                Math.max(2, hw * 0.16), Math.max(1.4, hh * 0.2), 0, 0, 7);
+      g.fill();
+    }
+  }
+
+  /* ---- the coastal battery: a turret pointed out to sea ---- */
+  if (K.gun) {
+    const bx = p.x, by = ty - hh * 0.1;
+    g.fillStyle = shade('#8d979d', dark);
+    g.beginPath(); g.ellipse(bx, by, hw * 0.5, hh * 0.5, 0, 0, 7); g.fill();
+    g.fillStyle = shade('#6d777d', dark);
+    g.beginPath(); g.ellipse(bx, by - hh * 0.25, hw * 0.36, hh * 0.36, 0, 0, 7); g.fill();
+    const sweep = Math.sin(this.t * 0.5) * 0.35;
+    g.save();
+    g.strokeStyle = shade('#4e585e', dark); g.lineWidth = Math.max(2, hw * 0.13);
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(bx, by - hh * 0.3);
+    g.lineTo(bx - Math.cos(sweep + 0.5) * hw * 1.15,
+             by - hh * 0.3 + Math.sin(sweep + 0.5) * hh * 0.75);
+    g.stroke(); g.restore();
+    g.fillStyle = night ? 'rgba(255,220,150,.7)' : 'rgba(255,255,255,.55)';
+    for (let i = 0; i < 2; i++)
+      g.fillRect(p.x - hw * 0.55 + i * hw * 0.75, p.y - hh * 0.2 - unit * 0.3,
+                 Math.max(2, hw * 0.2), Math.max(2, unit * 0.14));
+  }
+};
+
+/* olive-and-tan camouflage painted over a defence building */
+CityView.prototype._camo = function (g, p, hw, hh, h, b, dark) {
+  const cols = ['#5c6a42', '#8b8a5b', '#464331', '#727f4e'];
+  const rnd = mul32(hashStr('camo:' + b.x + ':' + b.y));
+  const faces = [
+    () => { g.moveTo(p.x - hw, p.y); g.lineTo(p.x, p.y + hh);
+            g.lineTo(p.x, p.y + hh - h); g.lineTo(p.x - hw, p.y - h); },
+    () => { g.moveTo(p.x + hw, p.y); g.lineTo(p.x, p.y + hh);
+            g.lineTo(p.x, p.y + hh - h); g.lineTo(p.x + hw, p.y - h); },
+    () => { g.moveTo(p.x, p.y - hh - h); g.lineTo(p.x + hw, p.y - h);
+            g.lineTo(p.x, p.y + hh - h); g.lineTo(p.x - hw, p.y - h); }
+  ];
+  faces.forEach((face, fi) => {
+    g.save();
+    g.beginPath(); face(); g.closePath(); g.clip();
+    const n = fi === 2 ? 5 : 8;
+    for (let i = 0; i < n; i++) {
+      g.fillStyle = shade(cols[Math.floor(rnd() * cols.length)], dark - 0.04);
+      const cxp = fi === 2 ? p.x + (rnd() * 2 - 1) * hw * 0.8 : p.x + (fi ? 1 : -1) * hw * rnd();
+      const cyp = fi === 2 ? p.y - h + (rnd() * 2 - 1) * hh * 0.8
+                           : p.y + hh * 0.4 - h * rnd();
+      g.beginPath();
+      g.ellipse(cxp, cyp, hw * (0.15 + rnd() * 0.24), hh * (0.3 + rnd() * 0.55),
+                rnd() * 3, 0, 7);
+      g.fill();
+    }
+    g.restore();
+  });
+};
+
+/* ---------- the general extruder ---------------------------------------
+   _box draws one axis-aligned cube on one cell. A hull, a lorry or a
+   container is neither axis-aligned nor one cell, so everything that is not
+   a building is extruded from a grid-space outline instead.
+
+   Both answers this needs fall straight out of the grid coordinates, with no
+   canvas and no projection, which is why they live here and are tested:
+   screen x is (gx - gy) and screen depth is (gx + gy). So a wall's distance
+   is its midpoint depth, and whether it faces screen-left or screen-right is
+   its midpoint (gx - gy) against the outline's own centre. */
+const prismFaces = (pts) => {
+  const n = pts.length;
+  let cu = 0;
+  for (let i = 0; i < n; i++) cu += pts[i].x - pts[i].y;
+  cu /= n;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    out.push({
+      a, b,
+      depth: (a.x + a.y + b.x + b.y) / 2,
+      side: ((a.x - a.y) + (b.x - b.y)) / 2 < cu ? 'a' : 'b'
+    });
+  }
+  /* back to front, so the painter's algorithm composites it correctly at any
+     heading — including one where a wall is edge-on and has zero width */
+  return out.sort((p, q) => p.depth - q.depth);
+};
+/* exported next to its const, not in the CityView.* group near WEATHER_FOR —
+   that group runs 1100 lines above this one and would hit the TDZ */
+CityView.prismFaces = prismFaces;
+
+CityView.prototype._box = function (g, p, hw, hh, h, top, left, right) {
+  g.fillStyle = left;
+  g.beginPath();
+  g.moveTo(p.x - hw, p.y); g.lineTo(p.x, p.y + hh);
+  g.lineTo(p.x, p.y + hh - h); g.lineTo(p.x - hw, p.y - h);
+  g.closePath(); g.fill();
+
+  g.fillStyle = right;
+  g.beginPath();
+  g.moveTo(p.x + hw, p.y); g.lineTo(p.x, p.y + hh);
+  g.lineTo(p.x, p.y + hh - h); g.lineTo(p.x + hw, p.y - h);
+  g.closePath(); g.fill();
+
+  g.fillStyle = top;
+  g.beginPath();
+  g.moveTo(p.x, p.y - hh - h); g.lineTo(p.x + hw, p.y - h);
+  g.lineTo(p.x, p.y + hh - h); g.lineTo(p.x - hw, p.y - h);
+  g.closePath(); g.fill();
+};
+
+/* Extrude a grid-space outline. `lift` and `height` are in storeys — the same
+   unit _building uses — so a prism and a building agree about how tall a
+   thing is at any canvas size. */
+CityView.prototype._prism = function (g, pts, lift, height, top, sideA, sideB) {
+  const unit = this.hh * 1.15;
+  const zb = lift * unit, zt = (lift + height) * unit;
+  const at = (p, z) => { const s = this.iso(p.x, p.y); return { x: s.x, y: s.y - z }; };
+
+  prismFaces(pts).forEach(f => {
+    const a0 = at(f.a, zb), b0 = at(f.b, zb);
+    const a1 = at(f.a, zt), b1 = at(f.b, zt);
+    g.fillStyle = f.side === 'a' ? sideA : sideB;
+    g.beginPath();
+    g.moveTo(a0.x, a0.y); g.lineTo(b0.x, b0.y);
+    g.lineTo(b1.x, b1.y); g.lineTo(a1.x, a1.y);
+    g.closePath(); g.fill();
+  });
+
+  g.fillStyle = top;
+  g.beginPath();
+  pts.forEach((p, i) => { const s = at(p, zt); if (i) g.lineTo(s.x, s.y); else g.moveTo(s.x, s.y); });
+  g.closePath(); g.fill();
+};
+
+/* A freighter, built entirely out of _prism so it depth-sorts against
+   buildings, flora and traffic like everything else on the map.
+   (hx, hy) is the heading in grid space: the bow points that way and the beam
+   is perpendicular to it, so the same code draws a ship crossing the horizon
+   and one coming straight up the arrival lane. */
+CityView.prototype._vessel = function (g, gx, gy, hx, hy, size, cargo, night) {
+  const d = Math.hypot(hx, hy) || 1;
+  const ux = hx / d, uy = hy / d;               /* along the hull */
+  const nx = -uy, ny = ux;                      /* across it */
+  const L = 1.5 * size, B = 0.5 * size;
+  const at = (a, b) => ({ x: gx + ux * a + nx * b, y: gy + uy * a + ny * b });
+  const dark = night ? -0.45 : 0;
+
+  /* wake — a flat shadow on the water, so the hull is not floating on nothing */
+  const w = this.iso(gx, gy);
+  g.save();
+  g.globalAlpha = night ? 0.22 : 0.16; g.fillStyle = '#000';
+  g.beginPath();
+  g.ellipse(w.x, w.y + this.hh * 0.2, this.hw * L * 1.1, this.hh * L * 0.8, 0, 0, 7);
+  g.fill(); g.restore();
+
+  /* hull: five points, pointed bow forward */
+  const hull = [at(L, 0), at(L * 0.42, -B), at(-L, -B), at(-L, B), at(L * 0.42, B)];
+  this._prism(g, hull, 0, 0.55 * size,
+    shade('#c9503f', dark), shade('#8e3729', dark - 0.05), shade('#a8422f', dark - 0.05));
+
+  /* deck stripe */
+  const deck = [at(L * 0.9, 0), at(L * 0.4, -B * 0.8), at(-L * 0.9, -B * 0.8),
+                at(-L * 0.9, B * 0.8), at(L * 0.4, B * 0.8)];
+  this._prism(g, deck, 0.55 * size, 0.06 * size,
+    shade('#e6dccb', dark), shade('#b9ad98', dark), shade('#c9bda6', dark));
+
+  /* containers, one per unit of cargo, stacked two abreast along the deck */
+  (cargo || []).forEach((c, i) => {
+    const a = L * 0.30 - (i >> 1) * B * 0.95;
+    const b = ((i % 2) ? 1 : -1) * B * 0.42;
+    const box = [at(a - B * 0.40, b - B * 0.34), at(a + B * 0.40, b - B * 0.34),
+                 at(a + B * 0.40, b + B * 0.34), at(a - B * 0.40, b + B * 0.34)];
+    this._prism(g, box, 0.61 * size, 0.34 * size,
+      shade(c.col, dark + 0.12), shade(c.col, dark - 0.18), shade(c.col, dark - 0.06));
+  });
+
+  /* bridge and funnel, aft */
+  const br = [at(-L * 0.60, -B * 0.62), at(-L * 0.22, -B * 0.62),
+              at(-L * 0.22, B * 0.62), at(-L * 0.60, B * 0.62)];
+  this._prism(g, br, 0.61 * size, 0.62 * size,
+    shade('#f2efe6', dark), shade('#bdb7a8', dark), shade('#d3ccbc', dark));
+  const fn = [at(-L * 0.52, -B * 0.20), at(-L * 0.34, -B * 0.20),
+              at(-L * 0.34, B * 0.20), at(-L * 0.52, B * 0.20)];
+  this._prism(g, fn, 1.23 * size, 0.42 * size,
+    shade('#3b3f47', dark), shade('#23262b', dark), shade('#2e3138', dark));
+};
+
+/* Ambient shipping, for a country whose water is BEHIND it. Drawn from
+   _backdrop, between the sea and the island, so the land in front occludes
+   whatever overlaps — the same place the old screen-space ship was drawn, and
+   the reason it looked right. A coast's water is in front of the town, so its
+   shipping goes through _draw's depth-sorted item list instead and is never
+   drawn from here.
+
+   A vessel sails at a constant depth — that is what makes it cross the frame
+   rather than sail into it — so its position is one number, u = gx - gy. */
+CityView.prototype._shipping = function (g, night) {
+  const uSpan = shipSpan(this.W, this.hw);
+  this.ships.forEach(s => {
+    const d = shipDepth(this.form, s.i);
+    const u = (s.x * 2 - 1) * uSpan;
+    this._vessel(g, (d + u) / 2, (d - u) / 2, 0.707, -0.707, s.s, s.cargo, night);
+  });
+};
+
+/* The inland counterpart of the freighter, out of the same extruder and with
+   the same signature, so the delivery animation does not care which one it is
+   sending down the lane. */
+CityView.prototype._lorry = function (g, gx, gy, hx, hy, size, cargo, night) {
+  const d = Math.hypot(hx, hy) || 1;
+  const ux = hx / d, uy = hy / d;
+  const nx = -uy, ny = ux;
+  const L = 0.85 * size, B = 0.34 * size;
+  const at = (a, b) => ({ x: gx + ux * a + nx * b, y: gy + uy * a + ny * b });
+  const dark = night ? -0.45 : 0;
+
+  /* dust thrown up behind — the one thing that says this is moving */
+  const w = this.iso(gx - ux * L * 1.4, gy - uy * L * 1.4);
+  g.save();
+  g.globalAlpha = night ? 0.10 : 0.20;
+  g.fillStyle = shade((this.land || LAND_DEF).sand, 0.1);
+  g.beginPath();
+  g.ellipse(w.x, w.y, this.hw * L * 0.9, this.hh * L * 0.7, 0, 0, 7);
+  g.fill(); g.restore();
+
+  const sh = this.iso(gx, gy);
+  g.save();
+  g.globalAlpha = night ? 0.22 : 0.16; g.fillStyle = '#000';
+  g.beginPath();
+  g.ellipse(sh.x, sh.y + this.hh * 0.14, this.hw * L, this.hh * L * 0.7, 0, 0, 7);
+  g.fill(); g.restore();
+
+  /* bed, then cab in front of it. The bed is deliberately darker than any
+     cargo colour — a grey crate on a grey flatbed is invisible, which is the
+     one thing this whole plan is trying not to be. */
+  const bed = [at(L * 0.25, -B), at(-L, -B), at(-L, B), at(L * 0.25, B)];
+  this._prism(g, bed, 0.10 * size, 0.16 * size,
+    shade('#454c57', dark), shade('#282d35', dark), shade('#343a44', dark));
+  const cab = [at(L, -B * 0.9), at(L * 0.3, -B * 0.9), at(L * 0.3, B * 0.9), at(L, B * 0.9)];
+  this._prism(g, cab, 0.10 * size, 0.52 * size,
+    shade('#4c8fd9', dark + 0.1), shade('#2f5f95', dark), shade('#3c76b6', dark));
+
+  /* The windscreen. Two ways this goes wrong, both seen on a render: tuck it
+     inside the cab's footprint and you see only its top face, which reads as
+     a white roof; make it long and pale and it swamps the cab like a slab.
+     So: a short band across the FRONT of the cab, standing just proud of it
+     so its walls show, with a darker top — in this projection the top face is
+     the biggest thing you see, and glass seen from above is dark, not white. */
+  const scr = [at(L * 1.02, -B * 0.95), at(L * 0.74, -B * 0.95),
+               at(L * 0.74, B * 0.95), at(L * 1.02, B * 0.95)];
+  this._prism(g, scr, 0.34 * size, 0.20 * size,
+    night ? '#6b5f42' : '#7d93a8', night ? '#ffe9a8' : '#dceaf8', night ? '#e8d296' : '#c3d8ec');
+
+  (cargo || []).slice(0, 3).forEach((c, i) => {
+    const a = -L * 0.18 - i * B * 0.95;
+    const box = [at(a - B * 0.42, -B * 0.78), at(a + B * 0.42, -B * 0.78),
+                 at(a + B * 0.42, B * 0.78), at(a - B * 0.42, B * 0.78)];
+    this._prism(g, box, 0.26 * size, 0.34 * size,
+      shade(c.col, dark + 0.14), shade(c.col, dark - 0.20), shade(c.col, dark - 0.07));
+  });
+};
+
+/* a small quad sitting flat on one wall */
+CityView.prototype._face = function (g, ax, ay, dx, dy, u, v, wu, wv, col) {
+  const x = ax + dx * u, y = ay + dy * u - v;
+  g.fillStyle = col;
+  g.beginPath();
+  g.moveTo(x, y);
+  g.lineTo(x + dx * wu, y + dy * wu);
+  g.lineTo(x + dx * wu, y + dy * wu - wv);
+  g.lineTo(x, y - wv);
+  g.closePath(); g.fill();
+};
+
+CityView.prototype._farm = function (g, p, night) {
+  const dry = this.weather === 'drought' || this.m.G < 30;
+  const a = shade(dry ? '#a8913f' : '#6aa84f', night ? -0.45 : 0);
+  const b = shade(dry ? '#8d7833' : '#54893d', night ? -0.45 : 0);
+  this._diamond(g, p, 0, a);
+  g.save(); g.strokeStyle = b; g.lineWidth = 1.6;
+  for (let i = 1; i < 5; i++) {
+    const t = i / 5;
+    g.beginPath();
+    g.moveTo(p.x - this.hw + this.hw * t, p.y - this.hh * t);
+    g.lineTo(p.x + this.hw * t, p.y + this.hh - this.hh * t);
+    g.stroke();
+  }
+  g.restore();
+};
+
+CityView.prototype._tree = function (g, p, b, night) {
+  const dry = this.m.G < 34 || this.weather === 'drought';
+  const trunk = shade('#6b4a2f', night ? -0.4 : 0);
+  const leaf  = shade(dry ? '#8a7a3c' : '#3f8f4a', night ? -0.5 : 0);
+  const s = this.hh * (0.9 + b.seed * 0.5);
+  g.fillStyle = trunk;
+  g.fillRect(p.x - 1.5, p.y - s * 0.8, 3, s * 0.9);
+  g.fillStyle = leaf;
+  const sway = Math.sin(this.t * 1.1 + b.seed * 6) * 1.6;
+  g.beginPath();
+  g.ellipse(p.x + sway, p.y - s * 1.25, this.hw * 0.42, s * 0.85, 0, 0, 7);
+  g.fill();
+};
+
+/* ---------- what grows on the coast ------------------------------------- */
+CityView.prototype._flora = function (g, f, night) {
+  const p = this.iso(f.gx, f.gy);
+  if (f.kind === 'palm')  return this._palm(g, p, f, night);
+  if (f.kind === 'rock')  return this._boulder(g, p, f, night);
+  if (f.kind === 'scrub') return this._scrub(g, p, f, night);
+  this._tree(g, p, f, night);
+};
+
+CityView.prototype._palm = function (g, p, f, night) {
+  const dry = this.m.G < 30 || this.weather === 'drought';
+  const s = this.hh * (1.5 + f.seed * 0.9);
+  const lean = (f.seed - 0.5) * s * 0.5;
+  const sway = Math.sin(this.t * 0.9 + f.seed * 6) * s * 0.09;
+  const tipX = p.x + lean + sway, tipY = p.y - s;
+  g.save();
+  g.strokeStyle = shade('#8a6b45', night ? -0.45 : 0);
+  g.lineWidth = Math.max(1.6, this.hw * 0.09);
+  g.beginPath();
+  g.moveTo(p.x, p.y);
+  g.quadraticCurveTo(p.x + lean * 0.3, p.y - s * 0.55, tipX, tipY);
+  g.stroke();
+  g.fillStyle = shade(dry ? '#8a7a3c' : '#2f8a52', night ? -0.5 : 0);
+  for (let i = 0; i < 6; i++) {
+    const a = i / 6 * Math.PI * 2 + f.seed * 3;
+    const rx = Math.cos(a) * this.hw * 0.42, ry = Math.sin(a) * this.hh * 0.5 - this.hh * 0.12;
+    g.beginPath();
+    g.moveTo(tipX, tipY);
+    g.quadraticCurveTo(tipX + rx * 0.7, tipY + ry * 0.5 - this.hh * 0.28,
+                       tipX + rx, tipY + ry);
+    g.quadraticCurveTo(tipX + rx * 0.6, tipY + ry * 0.5, tipX, tipY);
+    g.fill();
+  }
+  if (!dry) {                                            /* coconuts */
+    g.fillStyle = shade('#6b4a2f', night ? -0.4 : 0);
+    g.beginPath(); g.arc(tipX + 1.5, tipY + 2, Math.max(1.2, this.hw * 0.05), 0, 7); g.fill();
+  }
+  g.restore();
+};
+
+CityView.prototype._boulder = function (g, p, f, night) {
+  const s = this.hw * (0.20 + f.seed * 0.22);
+  g.fillStyle = shade('#8d8577', night ? -0.5 : 0);
+  g.beginPath(); g.ellipse(p.x, p.y - s * 0.35, s, s * 0.72, 0, 0, 7); g.fill();
+  g.fillStyle = shade('#a8a091', night ? -0.5 : 0);
+  g.beginPath(); g.ellipse(p.x - s * 0.22, p.y - s * 0.62, s * 0.5, s * 0.34, 0, 0, 7); g.fill();
+};
+
+CityView.prototype._scrub = function (g, p, f, night) {
+  const dry = this.m.G < 34 || this.weather === 'drought';
+  const s = this.hh * (0.45 + f.seed * 0.4);
+  const sway = Math.sin(this.t * 1.4 + f.seed * 9) * 1.1;
+  g.fillStyle = shade(dry ? '#9a8a4a' : '#4f9a55', night ? -0.5 : 0);
+  for (let i = 0; i < 3; i++) {
+    const dx = (i - 1) * s * 0.55;
+    g.beginPath();
+    g.ellipse(p.x + dx + sway * (i - 1) * 0.5, p.y - s * (0.4 + (i === 1 ? 0.3 : 0)),
+              s * 0.55, s * 0.45, 0, 0, 7);
+    g.fill();
+  }
+};
+
+/* ---------- the national monument in the square ------------------------- */
+CityView.prototype._monument = function (g, night) {
+  const p = this.iso(4, 4);
+  const H = clamp(this.m.H / 100, 0, 1);
+  const hw = this.hw * 0.3, hh = this.hh * 0.3;
+  const h  = this.hh * (2.0 + H * 2.6);
+  const dark = night ? -0.45 : 0;
+
+  g.save();
+  g.globalAlpha = night ? 0.24 : 0.17; g.fillStyle = '#000';
+  g.beginPath(); g.ellipse(p.x + hw * 0.4, p.y + hh * 0.5, hw * 1.9, hh * 1.5, 0, 0, 7);
+  g.fill(); g.restore();
+
+  /* plinth */
+  const pl = this.hh * 0.5;
+  this._box(g, p, this.hw * 0.52, this.hh * 0.52, pl,
+            shade('#d9d2c2', dark), shade('#b3ab99', dark - 0.05), shade('#8e8776', dark - 0.05));
+
+  /* the shaft — a pale stone spike that stands taller the more united the country is */
+  const q = { x: p.x, y: p.y - pl };
+  g.fillStyle = shade('#a9a293', dark - 0.05);
+  g.beginPath();
+  g.moveTo(q.x - hw, q.y); g.lineTo(q.x, q.y + hh);
+  g.lineTo(q.x, q.y + hh - h); g.lineTo(q.x - hw * 0.25, q.y - h);
+  g.closePath(); g.fill();
+  g.fillStyle = shade('#8b8474', dark - 0.05);
+  g.beginPath();
+  g.moveTo(q.x + hw, q.y); g.lineTo(q.x, q.y + hh);
+  g.lineTo(q.x, q.y + hh - h); g.lineTo(q.x + hw * 0.25, q.y - h);
+  g.closePath(); g.fill();
+  g.fillStyle = shade('#efe8d8', dark);
+  g.beginPath();
+  g.moveTo(q.x, q.y - hh * 0.25 - h); g.lineTo(q.x + hw * 0.25, q.y - h);
+  g.lineTo(q.x, q.y + hh * 0.25 - h); g.lineTo(q.x - hw * 0.25, q.y - h);
+  g.closePath(); g.fill();
+
+  /* the flame on top only lights when the people are together */
+  if (H > 0.5) {
+    const a = (H - 0.5) * 2, fl = this.hh * (0.5 + Math.sin(this.t * 4) * 0.07);
+    g.save();
+    g.globalAlpha = a;
+    const gr = g.createRadialGradient(q.x, q.y - h - fl, 0, q.x, q.y - h - fl, fl * 4);
+    gr.addColorStop(0, 'rgba(255,222,140,.95)'); gr.addColorStop(1, 'rgba(255,190,80,0)');
+    g.fillStyle = gr;
+    g.beginPath(); g.arc(q.x, q.y - h - fl, fl * 4, 0, 7); g.fill();
+    g.fillStyle = '#ffd571';
+    g.beginPath();
+    g.moveTo(q.x, q.y - h - fl * 2.1);
+    g.quadraticCurveTo(q.x + fl * 0.7, q.y - h - fl * 0.6, q.x, q.y - h);
+    g.quadraticCurveTo(q.x - fl * 0.7, q.y - h - fl * 0.6, q.x, q.y - h - fl * 2.1);
+    g.fill();
+    g.restore();
+  }
+};
+
+CityView.prototype._mine = function (g, p, b, night) {
+  const c = shade('#5e4f40', night ? -0.45 : 0);
+  this._diamond(g, p, 0, c);
+  g.fillStyle = shade('#38302a', night ? -0.4 : 0);
+  g.beginPath();
+  g.ellipse(p.x, p.y, this.hw * 0.62, this.hh * 0.62, 0, 0, 7); g.fill();
+  g.fillStyle = shade('#241f1b', night ? -0.4 : 0);
+  g.beginPath();
+  g.ellipse(p.x, p.y + this.hh * 0.1, this.hw * 0.34, this.hh * 0.34, 0, 0, 7); g.fill();
+  g.strokeStyle = shade('#7d6a56', night ? -0.4 : 0); g.lineWidth = 2;
+  g.beginPath();
+  g.moveTo(p.x - this.hw * 0.5, p.y - this.hh * 0.2);
+  g.lineTo(p.x - this.hw * 0.5, p.y - this.hh * 1.5);
+  g.lineTo(p.x + this.hw * 0.1, p.y - this.hh * 1.2); g.stroke();
+};
+
+/* ---------- little people and cars -------------------------------------- */
+const SKIN = ['#f0c58a', '#c98d5a', '#8b5a34', '#5d3a22'];
+const SHIRT = ['#e05a5a', '#4f8fd6', '#4fb87a', '#e0b040'];
+
+CityView.prototype._person = function (g, gx, gy, hue, scale, night) {
+  const p = this.iso(gx, gy);
+  const s = Math.max(2.2, this.hh * 0.36) * (scale || 1);
+  const bob = Math.sin(this.t * 6 + gx * 3 + gy * 2) * 0.6;
+  g.fillStyle = night ? shade(SHIRT[hue % 4], -0.35) : SHIRT[hue % 4];
+  g.fillRect(p.x - s * 0.35, p.y - s * 1.6 + bob, s * 0.7, s * 1.1);
+  g.fillStyle = night ? shade(SKIN[hue % 4], -0.3) : SKIN[hue % 4];
+  g.beginPath();
+  g.arc(p.x, p.y - s * 1.85 + bob, s * 0.42, 0, 7); g.fill();
+};
+
+/* One crate or sack. Materials are square-shouldered; food gets a tied neck so
+   a sack does not read as another box. `lift` is in storeys, like _prism's. */
+CityView.prototype._crate = function (g, gx, gy, lift, c, night) {
+  const r = 0.17, dark = night ? -0.45 : 0;
+  const box = [{ x:gx - r, y:gy - r }, { x:gx + r, y:gy - r },
+               { x:gx + r, y:gy + r }, { x:gx - r, y:gy + r }];
+  this._prism(g, box, lift, 0.24,
+    shade(c.col, dark + 0.14), shade(c.col, dark - 0.20), shade(c.col, dark - 0.07));
+  if (c.res === 'F') {
+    const p = this.iso(gx, gy);
+    const top = p.y - (lift + 0.24) * this.hh * 1.15;
+    g.fillStyle = shade('#8a6a3a', dark);
+    g.fillRect(p.x - this.hw * 0.05, top - this.hh * 0.16, this.hw * 0.10, this.hh * 0.18);
+  }
+};
+
+/* Somebody carrying something up the road. A Worker carries nothing, because a
+   Worker IS the thing that arrived. */
+CityView.prototype._porter = function (g, gx, gy, hue, c, night) {
+  this._person(g, gx, gy, hue, 0.95, night);
+  if (!c || c.person) return;
+  this._crate(g, gx, gy, 1.05, c, night);
+};
+
+CityView.prototype._car = function (g, gx, gy, c, night) {
+  const p = this.iso(gx, gy);
+  const w = Math.max(4, this.hw * 0.34), h = Math.max(2.4, this.hh * 0.42);
+  g.save();
+  g.globalAlpha = 0.2; g.fillStyle = '#000';
+  g.beginPath(); g.ellipse(p.x, p.y + h * 0.5, w * 0.9, h * 0.55, 0, 0, 7); g.fill();
+  g.restore();
+  g.fillStyle = night ? shade(c.col, -0.3) : c.col;
+  g.beginPath();
+  g.moveTo(p.x - w, p.y); g.lineTo(p.x, p.y - h);
+  g.lineTo(p.x + w, p.y);  g.lineTo(p.x, p.y + h);
+  g.closePath(); g.fill();
+  g.fillStyle = night ? '#ffe9a8' : 'rgba(255,255,255,.6)';
+  g.fillRect(p.x - w * 0.22, p.y - h * 0.5, w * 0.44, h * 0.45);
+};
+
+/* ---------- smoke, weather, smog, cracks -------------------------------- */
+CityView.prototype._smoke = function (g, dirt) {
+  g.save();
+  this.puffs.forEach(p => {
+    const pos = this.iso(p.x, p.y);
+    const life = p.life / p.max;
+    g.globalAlpha = clamp(life * (0.28 + dirt * 0.5), 0, 0.75);
+    g.fillStyle = dirt > 0.5 ? '#4b4740' : '#cfd4d8';
+    g.beginPath();
+    g.arc(pos.x + p.drift * 20, pos.y - this.hh * 2.2 - p.z, p.r * (2 - life), 0, 7);
+    g.fill();
+  });
+  g.restore();
+};
+
+CityView.prototype._weather = function (g, W, H) {
+  const w = this.weather;
+  if ((w === 'rain' || w === 'flood') && this.wq > 0.02) {
+    g.save();
+    g.globalAlpha = this.wq * 0.55;
+    g.strokeStyle = '#cfe4ff'; g.lineWidth = 1.2;
+    this.drops.forEach(d => {
+      const x = d.x * W, y = d.y * H;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x - 3, y + d.l); g.stroke();
+    });
+    g.restore();
+  }
+  if (w === 'flood' && this.wq > 0.02) {
+    const lvl = this.iso(N - 1, N - 1).y - this.hh * 3.2 * this.wq;
+    g.save();
+    g.globalAlpha = this.wq * 0.55; g.fillStyle = '#2f6f9c';
+    g.fillRect(0, lvl, W, H - lvl);
+    g.globalAlpha = this.wq * 0.35; g.strokeStyle = '#bfe4ff'; g.lineWidth = 1.4;
+    for (let i = 0; i < 3; i++) {
+      const y = lvl + 6 + i * 9;
+      g.beginPath();
+      for (let x = 0; x <= W; x += 9) g.lineTo(x, y + Math.sin(x * 0.05 + this.t * 2 + i) * 2);
+      g.stroke();
+    }
+    g.restore();
+  }
+  if (w === 'boom' && this.wq > 0.02) {                 /* construction sparks */
+    g.save(); g.globalAlpha = this.wq;
+    this.buildings.slice(0, 5).forEach((b, i) => {
+      const p = this.iso(b.x, b.y), y = p.y - b.h * this.hh * 1.15;
+      g.fillStyle = '#ffd76a';
+      const f = (this.t * 3 + i) % 1;
+      g.globalAlpha = this.wq * (1 - f) * 0.9;
+      g.beginPath(); g.arc(p.x + (i % 2 ? 6 : -6), y - f * 14, 2.2, 0, 7); g.fill();
+    });
+    g.restore();
+  }
+};
+
+CityView.prototype._smog = function (g, W, H, dirt) {
+  const heavy = this.weather === 'haze' ? 0.45 : 0;
+  const a = clamp(dirt * 0.72 + heavy, 0, 0.88);
+  if (a < 0.03) return;
+  const grd = g.createLinearGradient(0, H * 0.25, 0, H);
+  grd.addColorStop(0, 'rgba(146,134,108,0)');
+  grd.addColorStop(1, 'rgba(146,134,108,' + a.toFixed(2) + ')');
+  g.fillStyle = grd; g.fillRect(0, 0, W, H);
+};
+
+CityView.prototype._cracks = function (g, W, H, k) {
+  g.save();
+  g.globalAlpha = k * 0.7;
+  g.strokeStyle = '#c0442f'; g.lineWidth = 2;
+  const r = mul32(21);
+  for (let i = 0; i < 3; i++) {
+    let x = r() * W, y = H * (0.72 + r() * 0.2);
+    g.beginPath(); g.moveTo(x, y);
+    for (let s = 0; s < 5; s++) { x += (r() - 0.5) * 60; y += r() * 10; g.lineTo(x, y); }
+    g.stroke();
+  }
+  g.restore();
+};
+
+/* ------------------------------------------------------------------------ */
+global.CityView = CityView;
+
+})(typeof window !== 'undefined' ? window : this);

@@ -1,0 +1,2181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Republic 2126 — Teacher Console</title>
+<style>
+:root{--bg:#070d18;--panel:#101a2c;--panel2:#16243c;--line:#22334f;--ink:#eaf1fb;--dim:#93a7c4;
+ --gold:#f4c542;--grn:#4ad991;--red:#ff6b6b}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(1200px 700px at 50% -10%,#16294a 0%,var(--bg)60%);color:var(--ink);
+ font:15px/1.55 "Segoe UI",system-ui,sans-serif}
+.wrap{max-width:1240px;margin:0 auto;padding:18px}
+h1{font-size:24px;margin:0} h2{font-size:19px;margin:0 0 8px} h3{margin:0 0 8px}
+.sub{color:var(--dim);font-size:13.5px}
+.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);
+ border-radius:16px;padding:16px;box-shadow:0 12px 34px rgba(0,0,0,.42)}
+.row{display:flex;gap:10px;align-items:center}.between{justify-content:space-between}.wrapf{flex-wrap:wrap}
+button{font:inherit;cursor:pointer;border-radius:12px;border:1px solid var(--line);background:var(--panel2);
+ color:var(--ink);padding:10px 15px}
+button:hover{filter:brightness(1.15)}
+.p{background:linear-gradient(135deg,#2f7ff0,#1a4fb8);border-color:#3f8bff;font-weight:700}
+.gold{background:linear-gradient(135deg,#f4c542,#d99b1a);border-color:#f4c542;color:#241a00;font-weight:800}
+.sm{padding:7px 11px;font-size:13px;border-radius:10px}
+.hidden{display:none!important}
+input{font:inherit;background:#0c1424;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:10px 12px}
+/* The one dialog both start buttons open. A native <dialog> is doing the work:
+   Escape, the focus trap and the backdrop all come free, so a teacher who
+   opened the wrong one gets out the way they already expect to. */
+dialog{position:relative;background:linear-gradient(180deg,var(--panel2),var(--panel));
+ border:1px solid var(--line);border-radius:16px;padding:24px;color:var(--ink);
+ width:min(420px,92vw);box-shadow:0 22px 60px rgba(0,0,0,.6)}
+dialog::backdrop{background:rgba(3,7,15,.72)}
+.dlgx{position:absolute;top:12px;right:12px;padding:4px 9px;font-size:14px;line-height:1;border-radius:9px}
+.orline{display:flex;align-items:center;gap:10px;margin:20px 0 12px;color:var(--dim);font-size:12.5px}
+.orline::before,.orline::after{content:"";flex:1;height:1px;background:var(--line)}
+.err{color:var(--red);font-size:13px;margin-top:12px;text-align:left}
+/* No display: here, ever. QR.render() (public/qr.js) hides a failed render by
+   setting el.hidden = true without clearing innerHTML — that relies entirely
+   on the UA's `[hidden]{display:none}` rule, which an author display: would
+   defeat, painting an empty white box instead of hiding cleanly. */
+#joinQr{background:#fff;border-radius:10px;padding:6px;line-height:0}
+/* Size is owned by CSS, not by QR.svg()'s width/height attributes — those are
+   only the intrinsic fallback for a caller with no stylesheet. */
+#joinQr svg{display:block;width:104px;height:104px}
+.code{font-size:64px;font-weight:900;letter-spacing:14px;color:var(--gold);text-align:center;line-height:1.1}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:1.2fr .8fr}
+.g3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.lb{display:flex;gap:11px;align-items:center;padding:9px 11px;border-radius:12px;background:var(--panel);
+ border:1px solid var(--line);margin-bottom:7px}
+.rank{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-weight:900;background:#1b2b47}
+.rank.g1{background:linear-gradient(135deg,#f4c542,#d99b1a);color:#241a00}
+.big{font-size:26px;font-weight:900}
+.feed{max-height:280px;overflow:auto;font-size:13.5px}
+.feed div{padding:5px 0;border-bottom:1px solid #182741;color:var(--dim)}
+.scen{border:1px solid var(--line);border-radius:13px;padding:11px;background:var(--panel);cursor:pointer}
+.scen:hover{border-color:var(--gold)}
+/* Spec D's strike-kind picker, same look as the .tab/.tab.on pair index.html
+   already uses for its own row of choices — nothing this console needed
+   before, so it was never defined here. */
+.tab{padding:8px 13px;border-radius:10px;border:1px solid var(--line);background:var(--panel);cursor:pointer;font-size:13.5px}
+.tab.on{background:var(--gold);color:#241a00;font-weight:800;border-color:var(--gold)}
+.pill{background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:12.5px}
+.bar{height:6px;background:#0b1424;border-radius:99px;overflow:hidden;margin-top:5px}
+.bar i{display:block;height:100%}
+@media(max-width:900px){.g2{grid-template-columns:1fr}}
+/* The roster is printed and read aloud in a noisy room, so the two codes
+   have to be told apart at a glance and at a distance: monospaced so every
+   character is unambiguous, and coloured differently from each other so
+   "leader" and "class" cannot be swapped mid-read. */
+.rc,.cc,.mc{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+ font-weight:700;letter-spacing:1px;padding:1px 5px;border-radius:5px}
+.rc{background:#241d08;color:var(--gold)}
+.cc{background:#0c2a22;color:var(--grn)}
+/* The four ministry codes, one row of four compact chips under the leader/
+   class line — a hall's roster can run to 40 groups on one screen, so this
+   stays a single small line rather than growing the card. One shared colour
+   (distinct from leader-gold and class-green) is enough: the emoji ahead of
+   each code is what tells the four ministries apart, exactly as it does
+   everywhere else in the app. */
+.mc{background:#1a1730;color:#b9a6ff}
+.printhead{display:none}
+@media print{
+  body{background:#fff;color:#000}
+  .noprint,button{display:none!important}
+  .g2{grid-template-columns:1fr}
+  .card{border:1px solid #000;box-shadow:none;background:#fff}
+  /* Colour is the first thing a photocopier or a black-and-white printer
+     throws away — leader and class codes still have to be told apart by
+     shape, not just hue, so print gives them different border styles. */
+  .rc,.cc,.mc{background:none!important;color:#000!important}
+  .rc{border:1px solid #000}
+  .cc{border:2px dashed #000}
+  .mc{border:1px dotted #000}
+  .lb{border:1px solid #000;background:#fff;break-inside:avoid}
+  .sub{color:#333}
+  /* The screen header (hidden above via .noprint) carries the host key —
+     that credential authorises remove/reopen/reset and must never be on a
+     sheet that leaves the room. This plain, secret-free heading replaces
+     it for print only. */
+  .printhead{display:block!important;margin-bottom:14px}
+  /* Folding is a screen convenience and must never change what comes out of
+     the printer — the roster IS the slips a class is handed on the day, so a
+     folded card printing blank would only be found by a teacher at a printer
+     on the morning of the event. Pinned by tests/roster-fold.test.js. */
+  .folded #roster{display:block!important}
+}
+
+/* ---- the open card, as a news front page over the whole console ----
+   The console is what gets projected, so a thrown card takes the screen here
+   the same way it does on /screen. The masthead, headline and story are live
+   text drawn from the card, never baked into the photograph, so they stay
+   sharp at projector size and read exactly what the phones read. */
+#hcard,#hstrike{position:fixed;inset:0;z-index:60;opacity:0;visibility:hidden;
+  transition:opacity .35s ease;background:#060c18}
+#hcard.on,#hstrike.on{opacity:1;visibility:visible}
+#hcardImg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#hcardImg.gone{display:none}     /* a missing photograph still leaves the words */
+#hcardWash,#hstrikeWash{position:absolute;inset:0;background:linear-gradient(180deg,
+  rgba(4,8,16,.88) 0%,rgba(4,8,16,.42) 40%,rgba(4,8,16,.05) 64%,rgba(4,8,16,.72) 100%)}
+#hcardPlate,#hstrikePlate{position:absolute;left:0;right:0;top:0;padding:4.4vh 6vw 0;text-align:center}
+#hcardMast,#hstrikeMast{display:flex;align-items:center;justify-content:center;gap:18px;
+  font-family:Georgia,"Times New Roman",serif;letter-spacing:.34em;font-size:1.7vh;
+  text-transform:uppercase;color:var(--gold);margin-bottom:2.4vh}
+#hcardMast i,#hstrikeMast i{height:1px;width:14%;background:currentColor;opacity:.5}
+#hcardTitle,#hstrikeTitle{font-family:Georgia,"Times New Roman",serif;font-weight:700;color:#fff;
+  font-size:8vh;line-height:1.04;margin:0 0 2vh;text-shadow:0 4px 22px rgba(0,0,0,.75)}
+#hcardStory,#hstrikeStory{margin:0 auto;max-width:70%;font-size:3vh;line-height:1.4;
+  color:rgba(255,255,255,.93);text-shadow:0 2px 14px rgba(0,0,0,.8)}
+#hcardBar,#hstrikeBar{position:absolute;left:0;right:0;bottom:3.4vh;display:flex;
+  justify-content:center;gap:14px}
+
+/* Spec D. Above the card overlay, not instead of it: a strike thrown during
+   an open card is deliberately supported, so the two have to coexist.
+   61, one below #hres's 62 (below) — both used to be 61, and only worked
+   because #hres comes later in the DOM. The ordering a game master needs (the
+   vote wrap-up on top of a strike, should both somehow be up at once) is now
+   explicit rather than incidental. */
+#hstrike{z-index:61}
+#hstrikeIcon{font-size:9vh;line-height:1}
+/* The roll is variable length and the plate is sized for two lines of
+   headline. Scroll rather than overflow — twenty struck countries must not
+   push the bar off the bottom of a projector. */
+#hstrikeRoll{margin:2.4vh auto 0;max-width:70%;max-height:38vh;overflow-y:auto;
+  font-size:2.4vh;line-height:1.7;color:#fff;text-align:left}
+#hstrikeRoll .held{opacity:.72}
+
+/* ---- the Groups card, folded away ----
+   With ~50 countries in the hall the roster is fifty rows tall and the
+   leaderboard lands below the fold on a console that is being projected.
+   Screen only: the print rule above puts the roster back. */
+.folded #roster,.folded #filterRow,.folded #joinRow{display:none}
+
+/* ---- how the hall voted, across the projected console ----
+   Same surface as the card front page above, deliberately: the room has seen
+   that overlay on every card all session, so the wrap-up arriving the same way
+   needs no explaining from the front. No photograph — this screen is numbers,
+   and a picture behind them costs legibility at the back of a hall. */
+#hres{position:fixed;inset:0;z-index:62;opacity:0;visibility:hidden;
+  transition:opacity .3s ease;background:#060c18;padding:5vh 7vw;overflow:hidden}
+#hres.on{opacity:1;visibility:visible}
+#hresHead{display:flex;align-items:baseline;justify-content:space-between;gap:20px;
+  border-bottom:1px solid rgba(255,255,255,.16);padding-bottom:2vh;margin-bottom:3.4vh}
+#hresTitle{font-family:Georgia,"Times New Roman",serif;font-weight:700;color:#fff;
+  font-size:5.4vh;line-height:1.05;margin:0}
+#hresRound{color:var(--gold);letter-spacing:.24em;text-transform:uppercase;
+  font-size:1.7vh;white-space:nowrap}
+.hresRow{margin-bottom:3vh}
+.hresLab{display:flex;align-items:baseline;gap:14px;color:rgba(255,255,255,.94);
+  font-size:2.6vh;margin-bottom:1vh}
+.hresLab b{margin-left:auto;font-variant-numeric:tabular-nums;font-size:3.4vh;color:#fff}
+.hresTrack{height:2.6vh;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden}
+.hresFill{height:100%;background:var(--gold);border-radius:3px;
+  transition:width .45s cubic-bezier(.2,.7,.3,1)}
+/* Undecided is a real outcome and belongs on the chart, but it is not a
+   fourth option — hollow, so it reads as the absence it is. */
+.hresRow.none .hresLab,.hresRow.none .hresLab b{color:rgba(255,255,255,.55)}
+.hresRow.none .hresFill{background:repeating-linear-gradient(135deg,
+  rgba(255,255,255,.3) 0 6px,transparent 6px 12px)}
+#hresBar{position:absolute;left:0;right:0;bottom:3vh;display:flex;
+  align-items:center;justify-content:center;gap:18px;color:rgba(255,255,255,.7)}
+#hresCount{font-variant-numeric:tabular-nums;letter-spacing:.1em;font-size:1.8vh}
+#hresEmpty{color:rgba(255,255,255,.7);font-size:2.6vh;text-align:center;margin-top:14vh}
+</style>
+</head>
+<body><div class="wrap">
+
+<div class="row between wrapf noprint" style="margin-bottom:14px">
+  <div><h1>🎛️ Republic 2126 — Teacher Console</h1>
+    <div class="sub">Project this screen. Students play on their own devices.</div>
+    <!-- Only meaningful once a room is open, and the point of it is a laptop
+         that gets handed on: leaving takes the host key off this machine. -->
+    <button class="sm hidden" id="leaveBtn" onclick="leaveRoom()"
+            title="Forget this room on this laptop and go back to the start screen"
+            style="margin-top:6px">🚪 Leave this room</button></div>
+  <div class="row wrapf" id="hostPills"></div>
+  <!-- Deliberately NOT inside #hostPills: the poll rebuilds that row's
+       innerHTML every 2.2 seconds, so a revealed key could not survive there
+       for more than one tick. Its own element, painted by paintHostKey() and
+       by nothing else. noprint for the same reason the print heading has no
+       key: a sheet leaves the room, and this credential resets it. -->
+  <div class="row wrapf noprint" id="hostKey" style="margin-top:8px"></div>
+</div>
+
+<!-- Print-only: no host key here, ever — just what a teacher needs to label
+     a printed sheet and read the room code out. -->
+<div class="printhead">
+  <h2 id="printLabel">Republic 2126</h2>
+  <div class="sub" id="printRoom">—</div>
+</div>
+
+<div id="setup" class="card" style="text-align:center;padding:34px">
+  <h2>Start a session</h2>
+  <div class="sub">A <b>classroom room</b> is yours alone — you set the groups, try practice
+    cards and vet the names. A <b>hall room</b> is where every class meets for the mass game.</div>
+  <div class="row" style="gap:22px;justify-content:center;margin-top:18px;align-items:flex-start">
+    <div style="text-align:center">
+      <button class="gold" style="font-size:16px;padding:13px 22px" onclick="openStart('class')">🏫 Classroom room →</button>
+      <div style="margin-top:8px">
+        <a class="sm" href="/slides?track=t" target="_blank" rel="noopener"
+           style="display:inline-block;border:1px solid var(--line);border-radius:10px;padding:6px 11px;
+                  background:var(--panel2);color:var(--dim);text-decoration:none;font-size:12px"
+           title="Slides for the form teacher: set groups, hand out codes, practice cards, vet names, commit.">
+          📽️ Teacher run-sheet</a>
+      </div>
+    </div>
+    <div style="text-align:center">
+      <button style="font-size:16px;padding:13px 22px" onclick="openStart('hall')">🏟️ Hall room →</button>
+      <div style="margin-top:8px">
+        <a class="sm" href="/slides?track=g" target="_blank" rel="noopener"
+           style="display:inline-block;border:1px solid var(--line);border-radius:10px;padding:6px 11px;
+                  background:var(--panel2);color:var(--dim);text-decoration:none;font-size:12px"
+           title="Slides for the game master: project the code, the clock, rescues, final results.">
+          📽️ Game master run-sheet</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Both start buttons open this same dialog; openStart() swaps the words for
+     the kind that was clicked. Every way into a room — new, resumed, or
+     restored from last lesson's file — lives in here, so the page behind it is
+     two buttons and nothing to read past them. -->
+<dialog id="startDlg" class="noprint">
+  <button class="sm dlgx" onclick="closeStart()" aria-label="Close">✕</button>
+  <h2 id="dlgTitle">🏫 Classroom room</h2>
+  <div class="sub" id="dlgSub">—</div>
+
+  <!-- Resume first, and gold. Every teacher at this event is handed a room code
+       and host key in advance, so coming back is the ordinary path and opening a
+       new room is the exception — the order and the one gold button both say so,
+       and openStart() puts the cursor in the code field. -->
+  <div class="sub" id="dlgBack" style="margin-top:18px;margin-bottom:7px">Come back to a room you already opened</div>
+  <div class="row" style="gap:8px">
+    <input id="reRoom" maxlength="4" placeholder="CODE" style="width:100px;text-transform:uppercase;text-align:center">
+    <input id="reKey" placeholder="host key" style="flex:1;min-width:0">
+    <button class="gold" onclick="resumeRoom()">Resume</button>
+  </div>
+
+  <div class="orline">or start a new one</div>
+
+  <div class="row" style="gap:8px">
+    <input id="newLabel" maxlength="24" placeholder="Class, e.g. 3E" style="flex:1;min-width:0;text-align:center">
+    <button id="dlgNew" style="flex:0 0 auto" onclick="createRoom()">New practice session →</button>
+  </div>
+
+  <div class="sub" style="margin-top:18px">Backup file from last lesson?
+    <label class="sm" style="display:inline-block;border:1px solid var(--line);border-radius:10px;padding:7px 11px;cursor:pointer;background:var(--panel2)">
+      📂 Restore from file<input id="reFile" type="file" accept="application/json,.json" style="display:none" onchange="restoreBackup(this)"></label></div>
+
+  <div class="err hidden" id="dlgErr"></div>
+</dialog>
+
+<div id="live" class="hidden">
+  <!-- Full width, outside the two-column grid: this is the card a room is told
+       to look at, and inside the narrower left column the join address, the QR
+       and a 64px room code cannot sit on one line at any real domain length. -->
+  <div class="card noprint" style="margin-bottom:12px">
+    <div class="row between wrapf">
+      <div class="row" style="gap:14px">
+        <div id="joinQr" hidden></div>
+        <div><div class="sub">Students join at</div><div style="font-size:22px;font-weight:800" id="joinUrl">—</div>
+          <div class="sub" id="joinHow" style="margin-top:4px"></div></div>
+      </div>
+      <div id="roomCodeBox" class="hidden"><div class="sub" style="text-align:center">Room code</div><div class="code" id="roomCode">—</div></div>
+    </div>
+  </div>
+
+  <div class="grid g2">
+    <div>
+      <div class="card noprint" style="margin-bottom:12px">
+        <div class="row between wrapf" style="gap:10px">
+          <div class="row wrapf" style="gap:8px">
+            <button class="p" onclick="act('phase','prep')">1 · Nation building</button>
+            <button class="gold" onclick="act('phase','game')">2 · Start mass game</button>
+            <button onclick="act('phase','final')">3 · Final results</button>
+            <button class="sm hidden" id="resultsBtn" onclick="showResults()">📊 How the hall voted</button>
+          </div>
+          <div class="row" style="gap:8px">
+            <button class="sm hidden" id="roundBtn" onclick="act('round')">Next round ▶</button>
+            <button class="sm hidden" id="yieldBtn" onclick="act('yield')">📦 Deal trade materials</button>
+            <button class="sm" onclick="act('clear')">Close card</button>
+          </div>
+        </div>
+        <div class="row between wrapf" style="margin-top:10px;gap:10px">
+          <div class="sub" style="flex:1;min-width:220px" id="phaseHint"></div>
+          <button class="sm" onclick="saveBackup()" title="Downloads this room to your laptop. Do this at the end of a lesson if you are playing on another day.">💾 Save backup</button>
+        </div>
+        <!-- The clock never advances the round on its own: a group that needs
+             another thirty seconds should get it if the teacher says so. -->
+        <div class="row between wrapf" id="timerBar" style="margin-top:12px;gap:10px;
+             border-top:1px solid var(--line);padding-top:12px">
+          <div class="row wrapf" style="gap:8px;align-items:baseline">
+            <span class="sub">⏱️ Decision time</span>
+            <button class="sm" onclick="setTimer(60)">1 min</button>
+            <button class="sm" onclick="setTimer(120)">2 min</button>
+            <button class="sm" onclick="setTimer(180)">3 min</button>
+            <button class="sm" onclick="setTimer(0)">Off</button>
+          </div>
+          <div class="row" style="gap:12px;align-items:center">
+            <div class="sub" id="undecided"></div>
+            <div class="big" id="clock" style="font-variant-numeric:tabular-nums;min-width:104px;text-align:right">—</div>
+          </div>
+        </div>
+        <div class="sub" id="timerHint" style="margin-top:6px"></div>
+      </div>
+
+      <div class="card hidden" id="rosterCard" style="margin-bottom:12px">
+        <div class="row between wrapf" style="gap:10px">
+          <!-- A real <button>, so the print rule above hides it for free. The
+               header line itself never folds: the count is wanted even when
+               the fifty rows under it are not. -->
+          <div><button class="sm noprint" id="foldBtn" aria-expanded="true" aria-controls="roster"
+                       onclick="toggleRoster()" title="Fold the group list away so the leaderboard is in reach"
+                       style="border:none;background:none;padding:0 8px 0 0;font-size:15px">▾</button><b>Groups</b>
+            <span class="sub" id="commitCount">—</span></div>
+          <div class="row wrapf noprint" style="gap:8px" id="groupsRow">
+            <span class="sub">How many groups?</span>
+            <input id="nGroups" type="number" min="1" max="40" value="6" style="width:70px;text-align:center">
+            <button class="sm" onclick="setGroups()">Set</button>
+            <button class="sm" id="finishBtn" disabled onclick="finishSession()">Ready for the hall ✓</button>
+          </div>
+        </div>
+        <!-- Hall only: slot numbers were dropped on purpose (see renderRoster
+             below) but a teacher hunting one group among fifty needs SOME way
+             to jump to it fast. -->
+        <div class="row wrapf noprint hidden" id="filterRow" style="gap:8px;margin-top:8px">
+          <input id="rosterFilter" placeholder="Find a group by name or code…" oninput="filterRoster()" style="flex:1;min-width:180px">
+        </div>
+        <div id="roster" style="margin-top:10px"></div>
+        <div class="row wrapf noprint hidden" id="joinRow" style="gap:8px;margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
+          <span class="sub" id="pracLeft">—</span>
+          <button class="sm" id="openJoinBtn" onclick="toggleOpenJoin()" title="Lets students join this classroom room again just by typing its code.">Allow open joining</button>
+        </div>
+      </div>
+
+      <div class="card hidden noprint" id="rescueCard" style="margin-bottom:12px">
+        <div class="sub">A group stranded in a classroom room? Type their <b>leader code</b>.</div>
+        <input id="pullCode" maxlength="5" placeholder="CODE" style="width:120px;text-transform:uppercase;text-align:center">
+        <button class="sm" onclick="pullIn()">Bring them in</button>
+      </div>
+
+      <div class="card noprint">
+        <h3>🏆 Live leaderboard <span class="sub">well-rounded score</span></h3>
+        <div id="board"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card noprint" style="margin-bottom:12px">
+        <div class="row between" style="gap:10px;margin-bottom:6px">
+          <h3 id="scenHead" style="margin:0">🎴 Throw a scenario card</h3>
+          <div class="row" style="gap:8px">
+            <!-- only while a card is open and the front page has been dismissed -->
+            <button class="sm hidden" id="showCardBtn" onclick="showCard()">🖥️ Show the card again</button>
+            <button class="sm hidden" id="showStrikeBtn" onclick="showStrike()">☠️ Show the strike again</button>
+            <button class="sm hidden" id="deckResetBtn" onclick="resetDeck()">↺ Show all cards again</button>
+          </div>
+        </div>
+        <div class="sub" id="scenHint" style="margin-bottom:8px">Every country sees the same card and must choose one option.</div>
+        <div id="scenList" class="grid" style="gap:8px"></div>
+      </div>
+      <div class="card noprint hidden" id="strikeCard" style="margin-bottom:12px">
+        <h3 style="margin:0 0 6px">☠️ Strike a country</h3>
+        <div class="sub" style="margin-bottom:8px">Lands at once — no card, no timer. A country strong in the shielding pillar holds the line, and the room sees it.</div>
+        <div class="row wrapf" id="strikeKinds" style="gap:6px;margin-bottom:8px"></div>
+        <div id="strikeWho" style="margin-bottom:8px"></div>
+        <div class="row" style="gap:8px;align-items:center">
+          <label class="sub">or at random:</label>
+          <input id="strikeRandom" type="number" min="0" max="30" value="0" style="width:70px">
+          <button class="p" onclick="throwStrike()">Launch</button>
+        </div>
+        <div class="sub" id="strikeNow" style="margin-top:8px"></div>
+      </div>
+      <div class="card noprint"><h3>📰 Regional news</h3><div class="feed" id="feed"></div></div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<!-- ============ the open card, across the projected console ============
+     This console IS the screen at the front of the room, so the card has to
+     land here and not only on /screen. Outside .wrap, fixed to the viewport,
+     and last in the body so nothing on the console draws over it. -->
+<div id="hcard" class="noprint">
+  <img id="hcardImg" alt="">
+  <div id="hcardWash"></div>
+  <div id="hcardPlate">
+    <div id="hcardMast"><i></i>THE REPUBLIC HERALD<i></i></div>
+    <h1 id="hcardTitle"></h1>
+    <p id="hcardStory"></p>
+  </div>
+  <div id="hcardBar">
+    <button class="sm" onclick="hideCard()">✕ Back to the console</button>
+    <button class="p" onclick="closeCardFromOverlay()">Close card for everyone</button>
+  </div>
+</div>
+
+<!-- ============ a strike, across the projected console ============
+     A second overlay rather than a second mode on #hcard. renderHostCard runs
+     a state machine keyed on card identity whose job is to not repaint every
+     poll and to respect a dismissed card; a strike is not open or closed, it
+     happened. Threading a mode flag through that machine is how the card
+     overlay that worked in a real hall gets broken. -->
+<div id="hstrike" class="noprint">
+  <div id="hstrikeWash"></div>
+  <div id="hstrikePlate">
+    <div id="hstrikeMast"><i></i>THE REPUBLIC HERALD<i></i></div>
+    <div id="hstrikeIcon"></div>
+    <h1 id="hstrikeTitle"></h1>
+    <p id="hstrikeStory"></p>
+    <div id="hstrikeRoll"></div>
+  </div>
+  <div id="hstrikeBar">
+    <button class="sm" onclick="hideStrike()">✕ Back to the console</button>
+  </div>
+</div>
+
+<!-- ============ how the hall voted, across the projected console ============
+     Opened by hand at the wrap-up, never by the poll. Every word inside it
+     arrives over /api/host/results — nothing about the deck is written here. -->
+<div id="hres" class="noprint">
+  <div id="hresHead">
+    <h1 id="hresTitle"></h1>
+    <div id="hresRound"></div>
+  </div>
+  <div id="hresBody"></div>
+  <div id="hresBar">
+    <button class="sm" onclick="stepResults(-1)">◀</button>
+    <span id="hresCount"></span>
+    <button class="sm" onclick="stepResults(1)">▶</button>
+    <button class="sm" onclick="hideResults()">✕ Back to the console</button>
+  </div>
+</div>
+<script src="/qr.js"></script>
+<script>
+/* ============================================================
+   REPUBLIC 2126 — shared game engine
+   Used by: student app, host console, and the Railway server.
+   Zero dependencies. Deterministic.
+   ============================================================ */
+
+const GAME = {
+  name: 'Republic 2126',
+  teamSize: 5,
+  pointPool: 24,        // nation-building points the Leader splits between ministries
+  minMinistry: 3,
+  maxMinistry: 12,
+  rounds: 5,            // mass-game rounds
+  startCoins: 20,
+  startMeters: { E: 50, H: 50, S: 50, K: 50, D: 50, G: 50 }
+};
+
+/* ---------- the five people in a group ---------- */
+const ROLES = [
+  { key:'leader', icon:'👑', name:'Leader',
+    job:'Names the country, designs the flag, and decides how many nation-building points each ministry gets. Breaks ties.' },
+  { key:'edu', icon:'📚', name:'Minister of Education',
+    job:'Chooses how the country teaches its people. Builds Knowledge — which unlocks the best industries.' },
+  { key:'def', icon:'🛡️', name:'Minister of Defence',
+    job:'Keeps the country safe. Builds Defence and Stability, but weapons cost money.' },
+  { key:'trade', icon:'⚖️', name:'Minister of Trade & Industry',
+    job:'Spends the country\'s resources to run industries that earn coins. Leads all trading in the mass game.' },
+  { key:'infra', icon:'🏗️', name:'Minister of Infrastructure & Home Affairs',
+    job:'Builds homes, transport and power — and keeps every community living together in peace.' }
+];
+
+/* ---------- resources ---------- */
+const RES = [
+  { key:'W', icon:'🧑‍🏭', name:'Workers',   blurb:'Human resource — people to run your industries.' },
+  { key:'M', icon:'⛏️', name:'Materials',  blurb:'Natural resource — ore, timber, stone, fuel.' },
+  { key:'F', icon:'🌾', name:'Food',       blurb:'Agricultural resource — feeds your people.' }
+];
+
+/* ---------- homelands: every country starts different ---------- */
+const HOMELANDS = [
+  { key:'delta',  icon:'🌾', name:'River Delta',  res:{W:8,  M:3,  F:11}, gift:'Rich farmland — food to spare.',      bonus:{G:4} },
+  { key:'high',   icon:'⛰️', name:'Highlands',    res:{W:6,  M:12, F:4 }, gift:'Mountains full of ore and stone.',    bonus:{D:4} },
+  { key:'port',   icon:'⚓', name:'Port City',    res:{W:12, M:4,  F:5 }, gift:'A crowded, busy harbour full of people.', bonus:{E:4} },
+  { key:'isles',  icon:'🏝️', name:'Green Isles',  res:{W:7,  M:5,  F:8 }, gift:'Beautiful islands and clean seas.',   bonus:{G:8} },
+  { key:'forest', icon:'🌳', name:'Forest Belt',  res:{W:7,  M:9,  F:7 }, gift:'Timber, rivers and space to grow.',   bonus:{H:3} },
+  { key:'dry',    icon:'🏜️', name:'Dry Plains',   res:{W:10, M:9,  F:3 }, gift:'Oil and minerals under dry ground.',  bonus:{E:3} }
+];
+
+/* ---------- policy cards ----------
+   fx  : effect on meters  E economy, H harmony, S stability, K knowledge, D defence, G green
+   up  : coins of upkeep charged each round
+   tag : short line shown on the card
+   Divisive / short-sighted cards are cheaper on purpose — the trade-off is the lesson.
+------------------------------------ */
+const CARDS = {
+  edu: [
+    { key:'free',    icon:'🏫', name:'Free school for all',      cost:4, tag:'Every child learns, whoever they are.',        fx:{K:12,H:6},        up:2 },
+    { key:'biling',  icon:'🗣️', name:'Learn each other\'s tongue', cost:3, tag:'Students learn a second language of the land.', fx:{K:7,H:10},      up:1 },
+    { key:'tech',    icon:'🤖', name:'Science & AI institute',   cost:5, tag:'Trains the engineers of tomorrow.',             fx:{K:16,E:5},        up:2 },
+    { key:'skills',  icon:'🔧', name:'Factory skills training',  cost:2, tag:'Quick job training for industry.',              fx:{K:5,E:9,G:-2},    up:1 },
+    { key:'elite',   icon:'🏛️', name:'Elite schools only',       cost:2, tag:'Teach the top few, save the money.',           fx:{K:11,E:5,H:-12},  up:0 },
+    { key:'ban',     icon:'🚫', name:'Teach one culture only',   cost:1, tag:'One story, one history, one people.',           fx:{K:3,S:7,H:-16},   up:0 }
+  ],
+  def: [
+    { key:'ns',      icon:'🎖️', name:'National Service',         cost:4, tag:'Everyone serves together, side by side.',       fx:{D:13,H:8,S:5},    up:2 },
+    { key:'coast',   icon:'🚢', name:'Coast guard',              cost:3, tag:'Keeps sea lanes and trade safe.',               fx:{D:9,E:5},         up:2 },
+    { key:'cyber',   icon:'💻', name:'Cyber defence unit',       cost:3, tag:'Stops attacks you cannot see.',                 fx:{D:10,K:4},        up:2 },
+    { key:'buy',     icon:'🚀', name:'Buy foreign weapons',      cost:4, tag:'Powerful, fast — and expensive.',               fx:{D:18,E:-3},       up:5 },
+    { key:'peace',   icon:'🕊️', name:'Treaties & diplomacy',     cost:2, tag:'Make friends instead of enemies.',              fx:{D:5,H:7,S:6},     up:0 },
+    { key:'spy',     icon:'👁️', name:'Watch the people',         cost:2, tag:'Cameras, informers, no protests.',              fx:{D:7,S:14,H:-15},  up:1 }
+  ],
+  trade: [
+    { key:'port',    icon:'🛳️', name:'Open trade port',          cost:4, tag:'Ships from everywhere dock here.',              fx:{E:13,H:3},        up:2 },
+    { key:'sme',     icon:'🛍️', name:'Small business grants',    cost:2, tag:'Hawkers, shops and startups get a start.',      fx:{E:7,H:6},         up:1 },
+    { key:'fdi',     icon:'🏦', name:'Invite foreign investors',  cost:3, tag:'Money floods in — with conditions.',            fx:{E:15,G:-5,H:-6},  up:0 },
+    { key:'tour',    icon:'🏖️', name:'Tourism drive',            cost:2, tag:'Show the world your festivals and food.',       fx:{E:8,H:5,G:-3},    up:1 },
+    { key:'protect', icon:'🚧', name:'Protect local jobs',       cost:2, tag:'Local workers first, imports taxed.',           fx:{E:-3,S:10,H:4},   up:0 },
+    { key:'strip',   icon:'⛏️', name:'Dig up everything now',    cost:1, tag:'Sell the land\'s riches while prices are high.', fx:{E:16,G:-18},     up:0 }
+  ],
+  infra: [
+    { key:'mixed',   icon:'🏘️', name:'Mixed housing estates',    cost:4, tag:'Every race lives on the same block.',           fx:{H:16,S:7},        up:2 },
+    { key:'water',   icon:'🚰', name:'Clean water & sanitation', cost:3, tag:'Safe taps and drains in every home.',           fx:{H:8,S:7,G:5},     up:2 },
+    { key:'mrt',     icon:'🚇', name:'Mass rapid transit',       cost:5, tag:'The whole island, twenty minutes apart.',       fx:{E:11,G:7,H:5},    up:3 },
+    { key:'faith',   icon:'🛕', name:'Space for every faith',    cost:2, tag:'Temple, mosque, church, gurdwara — side by side.', fx:{H:14,S:5},     up:1 },
+    { key:'solar',   icon:'☀️', name:'Solar & wind farms',       cost:4, tag:'Costs more now, cleaner forever.',              fx:{E:4,G:16},        up:2 },
+    { key:'coal',    icon:'🏭', name:'Cheap coal power',         cost:1, tag:'Power tonight, smoke tomorrow.',                fx:{E:12,G:-16},      up:0 }
+  ]
+};
+
+/* ---------- industries: run with resources, not points ---------- */
+const INDUSTRIES = [
+  { key:'farm',  icon:'🌾', name:'Farms',            need:{W:2,M:0,F:0}, out:{coin:3,  F:3},  fx:{H:2},        req:null,
+    tag:'Feeds your people and makes a little money.' },
+  { key:'mine',  icon:'⛏️', name:'Mines',            need:{W:3,M:0,F:1}, out:{coin:5,  M:3},  fx:{G:-7},       req:null,
+    tag:'Digs up materials fast. Scars the land.' },
+  { key:'fact',  icon:'🏭', name:'Factories',        need:{W:3,M:2,F:0}, out:{coin:10},       fx:{G:-6,E:3},   req:null,
+    tag:'The biggest earner — and the biggest polluter.' },
+  { key:'port',  icon:'⚓', name:'Port & logistics', need:{W:2,M:1,F:0}, out:{coin:7},        fx:{E:3},        req:null,
+    tag:'Moves other people\'s goods. +1 trade deal each round.', trade:1 },
+  { key:'tech',  icon:'💻', name:'Tech park',        need:{W:2,M:1,F:0}, out:{coin:12},       fx:{K:2,E:2},    req:{K:60},
+    tag:'Needs Knowledge 60+. Clean, rich, hard to build.' },
+  { key:'tour',  icon:'🏖️', name:'Tourism',          need:{W:2,M:0,F:1}, out:{coin:8},        fx:{H:2},        req:{G:55},
+    tag:'Needs Green 55+. Visitors will not come to a smoggy country.' },
+  { key:'care',  icon:'🏥', name:'Care & services',  need:{W:2,M:0,F:1}, out:{coin:3},        fx:{H:5,S:3},    req:null,
+    tag:'Hospitals, childcare, eldercare. Holds society together.' }
+];
+
+/* ---------- what the Infrastructure ministry builds ----------
+   Industries employ people; buildings are what let a country employ them at
+   all. A country starts with only about half its workforce housed, so homes
+   are the first thing most groups need — and they cost Materials and Food,
+   which nothing else in the game consumed.
+
+   `card` is the Infrastructure policy card that unlocks this building, so the
+   choice a group made at the Policies step becomes a thing they can place.
+   Homes have no card: a group that spent nothing on Infrastructure must still
+   be able to house people.
+   `housed` is how many workers this building makes employable.
+   `fx` folds into the meters exactly as an industry's does — the card was the
+   decision, the buildings are its scale, so three coal plants cost more Green
+   than one.
+-------------------------------------------------------------- */
+const BUILDINGS = [
+  { key:'home',   icon:'🏠', name:'Homes',            need:{M:2,F:2}, housed:2, card:null,
+    tag:'Somewhere for your people to live. Always available.' },
+  { key:'estate', icon:'🏘️', name:'Housing estate',   need:{M:3,F:2}, housed:4, card:'mixed',
+    tag:'Dense blocks where every race lives on the same landing.' },
+  { key:'mrt',    icon:'🚇', name:'MRT station',      need:{M:3,F:1}, housed:3, card:'mrt',
+    tag:'People can live further out and still reach work.' },
+  { key:'solar',  icon:'☀️', name:'Solar farm',       need:{M:3,F:0}, housed:2, card:'solar', fx:{G:5},
+    tag:'Clean power for the homes it lights.' },
+  { key:'coal',   icon:'🏭', name:'Coal plant',       need:{M:1,F:0}, housed:3, card:'coal',  fx:{G:-6},
+    tag:'Powers more homes for less. The air pays for it.' },
+  { key:'park',   icon:'🌳', name:'Public park',      need:{M:1,F:1}, housed:0, card:'water', fx:{H:4,G:4},
+    tag:'Clean water, drains and green space between the blocks.' },
+  { key:'faith',  icon:'🛕', name:'Place of worship', need:{M:2,F:1}, housed:0, card:'faith', fx:{H:5},
+    tag:'Temple, mosque, church and gurdwara, side by side.' }
+];
+
+/* ---------- what the Education ministry runs ----------
+   The hall's only real coin sink. `advanceRound` only ever adds coins; the
+   only outflows before this were scenario costs and trade, so a country's
+   treasury grew all game with almost nothing to spend it on.
+
+   Programmes convert coins into METERS, deliberately never into resources.
+   Trading is the only way to get Materials in the hall, and that scarcity is
+   what sends the Trade Minister across the floor to talk to somebody — a
+   programme that sold Materials for coins would quietly close the one thing
+   this whole feature exists to open.
+
+   One-off: each is buyable once per country. Repeatable-at-flat-cost was
+   rejected because five rounds of income would grind Knowledge to 100 and the
+   industry gates would stop meaning anything.
+
+   No FOUND_SCALE is applied to these, unlike hall buildings. A building has a
+   prep equivalent, so an unscaled hall build would reward delaying it; a
+   programme exists only in the hall, so there is nothing to arbitrage and the
+   numbers below are exactly what they do.
+
+   There is deliberately no Defence programme — that stays Defence's identity,
+   which is alliances.
+
+   All six together cost 196 coins against a five-round income of roughly
+   100-200. Nobody buys them all; that is the point of the pricing.
+
+   NOTE: names and tags are placeholder copy, to be rewritten before the hall.
+-------------------------------------------------------- */
+const PROGRAMMES = [
+  { key:'literacy', icon:'📖', name:'Adult literacy drive',      cost:28, fx:{K:9,H:3},
+    tag:'Night classes for the grown-ups who never got to finish.' },
+  { key:'heritage', icon:'🏮', name:'Mother tongue & heritage',  cost:26, fx:{H:9,K:3},
+    tag:'Every child learns the language their grandparents think in.' },
+  { key:'science',  icon:'🔬', name:'Science scholarships',      cost:42, fx:{K:11,E:6},
+    tag:'Sends your brightest abroad, on the condition they come home.' },
+  { key:'green',    icon:'🌱', name:'Environmental education',   cost:30, fx:{G:9,K:3},
+    tag:'A generation that will not accept a smoggy sky.' },
+  { key:'civics',   icon:'🗳️', name:'Civics & national education', cost:32, fx:{S:8,H:6},
+    tag:'How the country is run, and why everyone has a stake in it.' },
+  { key:'retrain',  icon:'🔧', name:'Skills retraining',         cost:38, fx:{E:8,K:5,S:3},
+    tag:'For workers whose industry closed while they were still in it.' }
+];
+
+/* ---------- what a Leader may close ----------
+   Spec B gave three ministers a screen each. This is the Leader's answer:
+   four switches saying who may act without asking first. Switches, not
+   budgets — an allowance would ask a 14-year-old to hold a figure, what has
+   been spent, and what refills when, in a loud hall on a shared iPad.
+
+   Open is the default everywhere, and that is load-bearing: a Leader who
+   never finds the Cabinet screen must change nothing about how the hall
+   already plays.
+
+   MANDATE_WHAT lives here rather than in server.js because the refusal
+   sentence is built on BOTH sides — the server returns it from a route, the
+   client draws it as a banner. Two copies would drift, which is exactly what
+   happened to the client's ACT_ROLES mirror during Spec B. Each phrase is the
+   tail of "<name> has closed ___", so it is lower case and unpunctuated.
+------------------------------------------------ */
+const MANDATE_FLAGS = ['build', 'site', 'programme', 'ally'];
+const MANDATE_WHAT = {
+  build:     'building',
+  site:      'new industry',
+  programme: 'spending on programmes',
+  ally:      'alliances'
+};
+
+/* ---------- what it costs to not decide at all ----------
+   A cabinet that runs out of time and agrees on nothing is not neutral. On five
+   of the eight scenario cards every option costs coins, so before this a group
+   that simply said nothing kept its money and took no meter damage — silence
+   was the cheapest play, and a group that disengaged was never pulled up on it.
+
+   Deliberately smaller than the worst real choice: this should make indecision
+   cost something, not frighten groups into picking at random to avoid it. It
+   takes no coins — the lesson is about governing, not about money.
+-------------------------------------------------------- */
+const INDECISION = { fx:{ S:-4, H:-3 }, note:'could not agree in time' };
+
+/* ---------- the classroom drill ---------------------------------------------
+   One card, for one purpose: to prove that every group in a classroom knows
+   what happens when a scenario appears in the hall. It shows up, the cabinet
+   argues, the Leader picks, the meters move.
+
+   It is deliberately NOT one of the hall's eight. A teacher rehearsing used to
+   spend three real cards and got to pick which three from a list showing every
+   card's full story — which is one of the ways the hall deck leaked.
+
+   It carries `ally:true` on its co-operative choice on purpose: an alliance
+   changing what a choice is worth is the one mechanic that costs a group most
+   to meet cold in the hall.
+
+   It costs nothing. The coin component is zeroed for a classroom in
+   chooseScenario(), and the meters are put back from a snapshot when the card
+   is closed. */
+const DRILL = {
+  key:'clinic', icon:'🏥', title:'A Neighbour Offers Doctors',
+  story:'Your clinics are short-staffed. A neighbouring country offers to send doctors for a year.',
+  choices:[
+    { key:'a', icon:'🤝', label:'Accept, and send your nurses to train there', tag:'Both countries end up better.', fx:{H:6,K:5,D:2}, coin:-3, ally:true },
+    { key:'b', icon:'💼', label:'Hire private doctors instead', tag:'Faster. Expensive. Yours alone.', fx:{K:3,E:-2}, coin:-11 },
+    { key:'c', icon:'⏳', label:'Wait for your own graduates',  tag:'Free. Three years away.',         fx:{K:2,H:-5}, coin:0 }
+  ]
+};
+
+
+/* ============================================================
+   MATHS
+   ============================================================ */
+const clamp = (v, lo=0, hi=100) => Math.max(lo, Math.min(hi, v));
+const METER_KEYS = ['E','H','S','K','D','G'];
+/* `from` names the ministry whose policy cards raise this pillar, so a locked
+   industry card can tell a group where to go. Read off the card effects in
+   CARDS below. Only K and G gate an industry today; the rest are filled in so
+   the line stays correct if one ever does. */
+const METER_INFO = {
+  E:{ icon:'📈', name:'Economy',   blurb:'How much your country produces and earns.',        from:'Trade & Industry policies' },
+  H:{ icon:'🤝', name:'Harmony',   blurb:'How well every race and religion lives as one people.', from:'Infrastructure policies' },
+  S:{ icon:'🏛️', name:'Stability', blurb:'How steady and law-abiding daily life feels.',     from:'Defence policies' },
+  K:{ icon:'📚', name:'Knowledge', blurb:'How skilled and educated your people are.',        from:'Education policies' },
+  D:{ icon:'🛡️', name:'Defence',   blurb:'How safe your country is from threats.',           from:'Defence policies' },
+  G:{ icon:'🌿', name:'Green',     blurb:'How healthy your land, air and water are.',        from:'Infrastructure policies' }
+};
+
+/* Spec D. What it takes to put one person back in a home.
+
+   A Home costs M2 F2 and houses 2, so materials rehouse at exactly the price
+   of building — no arbitrage either way. Coins are crisis relief, bought at
+   crisis prices, and cost more.
+
+   Here rather than in server.js so the button label ("Send 3 Materials —
+   rehouses 3") and the server's arithmetic read one number. Spec B shipped
+   exactly this drift once already: the client's ACT_ROLES mirror fell out of
+   step with the server's and no test could see it. */
+const AID_PER_PERSON   = 2;   // Materials or Food
+const AID_COINS_PERSON = 6;   // coins
+
+function blankCountry(){
+  return {
+    name:'', motto:'', col1:'#0f5c8c', col2:'#f4c542', emblem:'🦁',
+    stripe:'diag', empos:'left',
+    homeland:'delta',
+    viewCode:'',                   // the class code — members watch, they do not drive
+    /* one per ministry — the four students who used to hold nothing but the
+       class code. Empty string, not absence, exactly as viewCode is: a saved
+       country still holding '' is one restore() has to backfill. */
+    minCodes:{ edu:'', def:'', trade:'', infra:'' },
+    pid:'',                        // public id: safe to put on a leaderboard
+    slot:0,                        // group number the teacher provisioned
+    locked:false,                  // committed; editing is closed
+    renameAsked:false,             // the teacher bounced the name back
+    rejectedName:'',               // what the name was at the moment it was
+                                    // bounced, so a stale autosave (or a
+                                    // resubmission of the exact same name)
+                                    // can be told apart from a genuine rename
+    origin:null,                   // the class room this country was built in
+    arrived:null,                  // hall round this country migrated in on — exempts it
+                                    // from indecision penalties for a card it was never asked
+    members:{ leader:'', edu:'', def:'', trade:'', infra:'' },
+    split:{ edu:6, def:6, trade:6, infra:6 },
+    picks:{ edu:[], def:[], trade:[], infra:[] },
+    industries:{},                 // key -> number of sites
+    buildings:{},                  // key -> number built
+    /* Education programmes already bought — one-off, so this is a set kept as
+       an array. Empty string entries are impossible: only a key from
+       PROGRAMMES ever reaches it, checked server-side. */
+    programmes:[],
+    /* Which ministries may act without asking the Leader first. All four open,
+       because open is what the hall did before this existed. Only an explicit
+       false ever closes a door — see mandateBlock() in server.js. */
+    mandate:{ build:true, site:true, programme:true, ally:true },
+    meters:{ ...GAME.startMeters },
+    coins:GAME.startCoins,
+    stock:{ W:0, M:0, F:0 },       // spare resources gained from trade / yields
+    /* People whose homes a strike destroyed. Server-owned: no client ever
+       posts it and /api/team/save never reads it. That is deliberate and it
+       is load-bearing — buildings merge UPWARD in the hall (growCounts), so
+       damage recorded as a lower building count would be read back as new
+       construction by the next autosave echo, restoring the homes free and
+       paying a meter bonus for being bombed. An integer nothing on a device
+       can write cannot be undone by a device. */
+    displaced:0,
+    allies:[],
+    log:[],
+    round:0,
+    ready:false
+  };
+}
+
+function homelandOf(c){ return HOMELANDS.find(h=>h.key===c.homeland) || HOMELANDS[0]; }
+
+/* points spent per ministry */
+function spent(c, m){
+  return (c.picks[m]||[]).reduce((s,k)=>{ const card=CARDS[m].find(x=>x.key===k); return s+(card?card.cost:0); },0);
+}
+function totalSplit(c){ return ['edu','def','trade','infra'].reduce((s,m)=>s+(c.split[m]||0),0); }
+
+/* resources available: homeland + traded stock */
+function pool(c){
+  const h = homelandOf(c).res;
+  return { W:h.W + (c.stock.W||0), M:h.M + (c.stock.M||0), F:h.F + (c.stock.F||0) };
+}
+function used(c){
+  const u = { W:0, M:0, F:0 };
+  for(const key of Object.keys(c.industries||{})){
+    const n = c.industries[key]||0; if(!n) continue;
+    const ind = INDUSTRIES.find(i=>i.key===key); if(!ind) continue;
+    u.W += ind.need.W*n; u.M += ind.need.M*n; u.F += ind.need.F*n;
+  }
+  /* buildings cost Materials and Food but no workers — you build them once,
+     you do not staff them */
+  for(const key of Object.keys(c.buildings||{})){
+    const n = c.buildings[key]||0; if(!n) continue;
+    const b = BUILDINGS.find(x=>x.key===key); if(!b) continue;
+    u.M += (b.need.M||0)*n; u.F += (b.need.F||0)*n;
+  }
+  return u;
+}
+/* Workers are counted against how many are HOUSED, not how many exist —
+   an unhoused worker cannot be employed. Materials and Food still come
+   from the pool. */
+function free(c){
+  const p=pool(c), u=used(c);
+  return { W:housed(c)-u.W, M:p.M-u.M, F:p.F-u.F };
+}
+
+/* How many of a country's workers COULD have somewhere to live — what the
+   homes hold, before anything is taken away. Capped at the workforce that
+   actually exists, so over-building homes is visibly wasted rather than
+   silently banked.
+
+   Split out of housed() by Spec D. The strike arithmetic has to size damage
+   against the workforce a country HAS, not the one a previous strike left it:
+   feeding housed() back into its own damage formula makes the cap
+   uncomputable, and a country struck twice could be ground below the floor
+   the cap exists to hold. */
+function capacity(c){
+  const base = Math.ceil(homelandOf(c).res.W / 2);
+  let extra = 0;
+  for(const key of Object.keys(c.buildings||{})){
+    const n = c.buildings[key]||0; if(!n) continue;
+    const b = BUILDINGS.find(x=>x.key===key); if(!b) continue;
+    extra += (b.housed||0)*n;
+  }
+  return Math.min(pool(c).W, base + extra);
+}
+
+/* Workers are counted against how many are HOUSED, not how many exist — an
+   unhoused worker cannot be employed. Materials and Food still come from the
+   pool.
+
+   People whose homes were destroyed by a strike are unhoused in exactly the
+   same sense, which is the whole of Spec D's damage model: one integer, and
+   every consequence falls out of this subtraction. `|| 0` because a country
+   restored from a snapshot written before Spec D carries no such key. */
+function housed(c){
+  return Math.max(0, capacity(c) - (c.displaced || 0));
+}
+
+/* ---------- baseline meters from the founding decisions ---------- */
+const FOUND_SCALE = 0.62;   // keeps founding scores off the ceiling so later play still matters
+
+/* diminishing returns: the last ten points of any pillar are the hardest to win,
+   and a pillar already near zero cannot fall much further */
+const FLOOR = 6;
+function nudge(v, d){
+  if(d >= 0) return clamp(v + d*Math.min(1, (100-v)/38), FLOOR, 100);
+  return clamp(v + d*Math.min(1, Math.max(0, v-FLOOR)/34), FLOOR, 100);
+}
+
+function foundingMeters(c){
+  const m = { ...GAME.startMeters };
+  const add = (k, v) => { m[k] = nudge(m[k]==null?50:m[k], v*FOUND_SCALE); };
+  const h = homelandOf(c);
+  for(const k in (h.bonus||{})) add(k, h.bonus[k]);
+  for(const min of ['edu','def','trade','infra']){
+    for(const key of (c.picks[min]||[])){
+      const card = CARDS[min].find(x=>x.key===key); if(!card) continue;
+      for(const k in card.fx) add(k, card.fx[k]);
+    }
+  }
+  for(const key of Object.keys(c.industries||{})){
+    const n=c.industries[key]||0; if(!n) continue;
+    const ind=INDUSTRIES.find(i=>i.key===key); if(!ind) continue;
+    for(const k in (ind.fx||{})) add(k, ind.fx[k]*n);
+  }
+  for(const key of Object.keys(c.buildings||{})){
+    const n=c.buildings[key]||0; if(!n) continue;
+    const b=BUILDINGS.find(x=>x.key===key); if(!b) continue;
+    for(const k in (b.fx||{})) add(k, b.fx[k]*n);
+  }
+  METER_KEYS.forEach(k=>m[k]=clamp(Math.round(m[k]*10)/10));
+  return m;
+}
+
+/* upkeep charged each round */
+function upkeep(c){
+  let u = 0;
+  for(const min of ['edu','def','trade','infra'])
+    for(const key of (c.picks[min]||[])){
+      const card = CARDS[min].find(x=>x.key===key); if(card) u += card.up||0;
+    }
+  return u;
+}
+
+/* trade slots — how many deals a team may strike per round */
+function tradeSlots(c){
+  let t = 2;
+  for(const key of Object.keys(c.industries||{})){
+    const ind=INDUSTRIES.find(i=>i.key===key);
+    if(ind && ind.trade) t += ind.trade*(c.industries[key]||0);
+  }
+  return Math.min(6, t);
+}
+
+/* ---------- one round of production ---------- */
+function roundIncome(c){
+  const m = c.meters;
+  const harmonyPull  = 0.62 + (m.H/100)*0.55;     // divided countries waste what they earn
+  const stabilityPull= 0.72 + (m.S/100)*0.40;
+  const econPull     = 0.70 + (m.E/100)*0.55;
+  let gross = 0, detail = [];
+  for(const key of Object.keys(c.industries||{})){
+    const n = c.industries[key]||0; if(!n) continue;
+    const ind = INDUSTRIES.find(i=>i.key===key); if(!ind) continue;
+    let ok = true;
+    if(ind.req) for(const k in ind.req) if(m[k] < ind.req[k]) ok = false;
+    const raw = (ind.out.coin||0)*n;
+    const val = ok ? raw : Math.round(raw*0.35);
+    gross += val;
+    detail.push({ key, n, coins:val, stalled:!ok });
+  }
+  const allyBonus = 1 + Math.min(3, (c.allies||[]).length)*0.07;
+  /* A fourth pull, alongside harmony/stability/econ. Until Spec D a worker
+     shortage cost a country nothing at all: the industry gate above tests
+     ind.req against METERS, never against workers, so a country whose people
+     had been displaced kept producing exactly as before and the only symptom
+     was the next save being refused.
+
+     Inert for normal play. Every path that could push free().W negative
+     already refuses to — /api/team/save reverts, and both trade routes clamp
+     on free() — so shortfall is 0 for any country that has never been struck.
+     tests/balance.test.js pins that rather than trusting it.
+
+     The 0.35 floor is the same number a stalled industry already uses a few
+     lines above: a struck country's factories behave like stalled ones, which
+     is a shape the game has already taught. */
+  const usedW      = used(c).W;
+  const shortfall  = Math.max(0, usedW - housed(c));
+  const workerPull = usedW ? Math.max(0.35, 1 - shortfall/usedW) : 1;
+  const net = Math.round(gross*harmonyPull*stabilityPull*econPull*allyBonus*workerPull) - upkeep(c);
+  return { gross, net, detail, allyBonus, workerPull, upkeep:upkeep(c) };
+}
+
+/* ---------- drift: what your country becomes if you just keep going ---------- */
+function drift(c){
+  const m = { ...c.meters };
+  // pollution from industry accumulates
+  let dirty = 0, clean = 0;
+  for(const key of Object.keys(c.industries||{})){
+    const ind = INDUSTRIES.find(i=>i.key===key); if(!ind) continue;
+    const n = c.industries[key]||0;
+    if((ind.fx||{}).G) { if(ind.fx.G<0) dirty += -ind.fx.G*n*0.17; else clean += ind.fx.G*n*0.22; }
+  }
+  m.G = nudge(m.G, clean - dirty);
+  // low harmony eats stability; low green eats harmony and health
+  if(m.H < 45) m.S = nudge(m.S, -(45-m.H)*0.18);
+  if(m.G < 40) { m.H = nudge(m.H, -(40-m.G)*0.11); m.E = nudge(m.E, -(40-m.G)*0.09); }
+  if(m.S < 40) m.E = nudge(m.E, -(40-m.S)*0.15);
+  // a knowledgeable, harmonious country slowly compounds
+  if(m.K > 60 && m.H > 60) m.E = nudge(m.E, 2.2);
+  if(m.H > 65) m.S = nudge(m.S, 1.6);
+  return m;
+}
+
+function applyFx(meters, fx){
+  const m = { ...meters };
+  for(const k in (fx||{})) m[k] = nudge(m[k]==null?50:m[k], fx[k]);
+  return m;
+}
+
+/* ============================================================
+   SCORING — the well-rounded country wins
+   ============================================================ */
+function wealthScore(coins){
+  // 0 coins -> 20, 100 -> 62, 200 -> 79, 400 -> 96
+  return clamp(Math.round(20 + 42*Math.log(1 + Math.max(0,coins)/100)/Math.log(2)));
+}
+
+function pillars(c){
+  const m = c.meters;
+  return {
+    Wealth:    wealthScore(c.coins),
+    Harmony:   Math.round(m.H),
+    Stability: Math.round(m.S),
+    Knowledge: Math.round(m.K),
+    Defence:   Math.round(m.D),
+    Green:     Math.round(m.G)
+  };
+}
+
+function score(c){
+  const p = pillars(c);
+  const vals = Object.values(p);
+  const mean = vals.reduce((s,v)=>s+v,0)/vals.length;
+  const geo = Math.pow(vals.reduce((s,v)=>s*Math.max(1,v),1), 1/vals.length);
+  const lowest = Math.min(...vals), highest = Math.max(...vals);
+  const balance = Math.round(100 - (highest - lowest));
+  // a country is only as strong as its weakest pillar
+  const wellRounded = 0.70 + 0.30*(lowest/Math.max(1, mean));
+  const overall = Math.round(Math.min(mean, mean*wellRounded));
+  return { pillars:p, mean:Math.round(mean), geo:Math.round(geo), balance, overall, lowest, highest };
+}
+
+function title(c){
+  const s = score(c), p = s.pillars;
+  if(s.balance >= 78 && s.overall >= 72) return { tag:'🏆 The Complete Nation', line:'Strong everywhere, weak nowhere. This is what a well-rounded country looks like.' };
+  if(p.Wealth >= 75 && p.Harmony < 45)   return { tag:'💔 The Rich but Divided', line:'The money came. The people never became one nation.' };
+  if(p.Green < 35 && p.Wealth >= 65)     return { tag:'🏭 The Smoky Boomtown',   line:'Full wallets, empty skies. The bill arrives later.' };
+  if(p.Harmony >= 72 && p.Wealth < 45)   return { tag:'🕊️ The Happy but Poor',   line:'A warm, united people — with too little to build on.' };
+  if(p.Defence >= 70 && p.Harmony < 52)  return { tag:'🏰 The Fortress',         line:'Safe from outside. Not safe from inside.' };
+  if(s.overall >= 62)                    return { tag:'🌱 The Rising Republic',  line:'A solid country with real momentum. Not finished — but on its way.' };
+  if(s.balance >= 62)                    return { tag:'🧭 The Steady Middle',    line:'Nothing is broken — but nothing is strong yet either. Pick something to be great at.' };
+  return { tag:'🧱 The Struggling State', line:'Too many gaps at once. Every pillar needs the others.' };
+}
+
+/* ---------- what the city looks like (drives the 2D visual) ---------- */
+/* NOT what draws the island. The isometric city is CityView._plan() in
+   city.js; this is a plain tile list kept for anything that wants the shape of
+   a country without a canvas. Change both, or change the one you meant. */
+function cityPlan(c){
+  const m = c.meters, tiles = [];
+  const add = (icon, n, kind) => { for(let i=0;i<n;i++) tiles.push({ icon, kind }); };
+  const ind = c.industries || {};
+  add('🏭', Math.min(6, ind.fact||0), 'fact');
+  add('⛏️', Math.min(4, ind.mine||0), 'mine');
+  add('🌾', Math.min(6, ind.farm||0), 'farm');
+  add('⚓', Math.min(3, ind.port||0), 'port');
+  add('💻', Math.min(4, ind.tech||0), 'tech');
+  add('🏖️', Math.min(3, ind.tour||0), 'tour');
+  add('🏥', Math.min(3, ind.care||0), 'care');
+  /* what the Infrastructure ministry actually built, not merely what it voted
+     for — a group with five estates should see five */
+  const bld = c.buildings || {};
+  for(const b of BUILDINGS){
+    const n = bld[b.key]||0; if(!n) continue;
+    add(b.icon, Math.min(6, n), 'infra');
+  }
+  const picks =[].concat(c.picks.edu||[], c.picks.def||[], c.picks.trade||[], c.picks.infra||[]);
+  const map = { free:'🏫', tech:'🔬', mixed:'🏘️', mrt:'🚇', solar:'☀️', coal:'🏭', faith:'🛕',
+                water:'🚰', ns:'🎖️', buy:'🚀', port:'🛳️', tour:'🏖️', sme:'🛍️', cyber:'📡',
+                spy:'📹', elite:'🏛️', biling:'🗣️', peace:'🕊️', coast:'🚢' };
+  picks.forEach(k=>{ if(map[k]) tiles.push({ icon:map[k], kind:'civic' }); });
+  while(tiles.length < 12) tiles.push({ icon:'🏠', kind:'home' });
+  return {
+    tiles: tiles.slice(0, 24),
+    smog:  clamp(Math.round((55 - m.G)*1.6), 0, 90) / 100,
+    glow:  clamp(Math.round((m.E + m.H)/2)) / 100,
+    crack: m.S < 45,
+    happy: m.H >= 65,
+    night: false
+  };
+}
+
+/* ---------- helpers used by the server ---------- */
+function makeCode(n, seedFn){
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = ''; for(let i=0;i<n;i++) s += A[Math.floor(seedFn()*A.length)];
+  return s;
+}
+
+/* A country's name, motto, emblem and two colours are typed by a group and
+   shown to the whole room — on their own screen, on the shared leaderboard and
+   on the teacher's console. Everything a group types goes through this before
+   it reaches markup. The quote matters as much as the angle bracket: a colour
+   of `#fff" onload="…` escapes a fill="…" attribute without ever using `<`. */
+function esc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/* Colours land inside SVG fill="…". Anything that is not a plain #rrggbb is
+   not a colour a group could have picked with the swatch control, so it is
+   replaced rather than escaped — a broken flag is better than a broken room. */
+function safeColour(v, fallback){
+  return /^#[0-9a-fA-F]{6}$/.test(String(v || '')) ? String(v) : fallback;
+}
+
+/* ============================================================
+   BITES — the same card, landing differently on different countries
+   ============================================================
+   A choice may carry a `bite` array. Each entry is a condition, an effect and
+   a sentence, and the same entry produces both the arithmetic and the warning
+   a phone shows — one source of truth, so the two cannot drift apart.
+
+   Returns the TILT ONLY, never the total. chooseScenario adds it to the base
+   it has already ally-scaled.
+
+   Nothing here throws. The deck is hand-edited and a mistyped condition must
+   cost a nuance, not a hall in front of 300 people. */
+
+/* How many of an industry a country runs — 0 for anything it never built. */
+function ownedCount(c, key){
+  const ind = (c && c.industries) || {};
+  return Math.max(0, ind[key] || 0);
+}
+/* True when this country satisfies one condition. Unknown shapes are false,
+   which is what makes a typo inert rather than fatal. */
+function biteMatches(cond, c){
+  if(!cond || typeof cond !== 'object') return false;
+  if(cond.industry != null) return ownedCount(c, cond.industry) >= (cond.min == null ? 1 : cond.min);
+  if(cond.pick != null){
+    const picks = (c && c.picks) || {};
+    return Object.keys(picks).some(m => Array.isArray(picks[m]) && picks[m].includes(cond.pick));
+  }
+  if(cond.homeland != null) return (c && c.homeland) === cond.homeland;
+  if(cond.meter != null){
+    const v = ((c && c.meters) || {})[cond.meter];
+    if(typeof v !== 'number') return false;
+    if(cond.below != null) return v < cond.below;
+    if(cond.above != null) return v > cond.above;
+    return false;
+  }
+  return false;
+}
+const fxWeight = (fx) => Object.keys(fx || {}).reduce((s,k)=>s + Math.abs(fx[k]||0), 0);
+
+function biteChoice(choice, c){
+  const out = { fx:{}, coin:0, notes:[] };
+  const list = (choice && Array.isArray(choice.bite)) ? choice.bite : [];
+  if(!list.length) return out;
+
+  const hits = [];
+  for(const b of list){
+    if(!b || typeof b !== 'object') continue;
+    if(!biteMatches(b.if, c)) continue;
+    const n = b.per ? ownedCount(c, b.per) : 1;
+    if(!n) continue;
+    const fx = {}; let weight = 0;
+    for(const k in (b.fx || {})){ fx[k] = (b.fx[k] || 0) * n; weight += Math.abs(fx[k]); }
+    const coin = (b.coin || 0) * n;
+    weight += Math.abs(coin);
+    hits.push({ fx, coin, weight, note: b.note ? String(b.note).replace(/\{n\}/g, n) : '' });
+  }
+  if(!hits.length) return out;
+
+  for(const h of hits){
+    for(const k in h.fx) out.fx[k] = (out.fx[k] || 0) + h.fx[k];
+    out.coin += h.coin;
+  }
+
+  /* The cap, and the whole reason a bite can never be ruinous. Meter tilt is
+     bounded by the choice's own meter weight and coin tilt by its own coin
+     cost, so a bite intensifies what a card already does and cannot invent a
+     consequence the card does not have — a choice costing no coins never grows
+     a coin cost. Scaled proportionally, so the shape of the tilt survives
+     being shrunk. */
+  const budget = fxWeight(choice.fx);
+  const got = fxWeight(out.fx);
+  if(got > budget){
+    const k = budget / got;
+    for(const m in out.fx) out.fx[m] = Math.round(out.fx[m] * k);
+  }
+  const coinBudget = Math.abs((choice && choice.coin) || 0);
+  /* NOT Math.sign(x) * 0 — that is -0, and Object.is(-0, 0) is false, so a
+     strictEqual against 0 fails on a value that is zero by every other
+     measure. The same trap is why the zero keys below are deleted rather than
+     left sitting at -0: Math.round(-0.2) is -0 too. */
+  if(Math.abs(out.coin) > coinBudget) out.coin = coinBudget === 0 ? 0 : Math.sign(out.coin) * coinBudget;
+  if(out.coin === 0) out.coin = 0;
+  /* A meter scaled to nothing is a meter that did not move. Leaving the key
+     behind at 0 (or -0) would make a no-op tilt look like a tilt. */
+  for(const m in out.fx) if(out.fx[m] === 0) delete out.fx[m];
+
+  /* Heaviest first, at most two: three warnings under three choices is a wall
+     of text on a phone with forty seconds left on the clock. */
+  out.notes = hits.filter(h => h.note).sort((a,b) => b.weight - a.weight).slice(0,2).map(h => h.note);
+  return out;
+}
+
+const ENGINE = {
+  GAME, ROLES, RES, HOMELANDS, CARDS, INDUSTRIES, BUILDINGS, PROGRAMMES, MANDATE_FLAGS, MANDATE_WHAT, DRILL, INDECISION,
+  METER_KEYS, METER_INFO, clamp, blankCountry, homelandOf, spent, totalSplit,
+  pool, used, free, foundingMeters, upkeep, tradeSlots, roundIncome, drift,
+  applyFx, FOUND_SCALE, biteChoice, wealthScore, pillars, score, title, cityPlan, makeCode, esc, safeColour, housed, capacity,
+  AID_PER_PERSON, AID_COINS_PERSON
+};
+
+/* SCENARIOS, METER_KEYS, METER_INFO come from the inlined engine */
+const $ = id => document.getElementById(id);
+let R = { room:null, key:null, data:null, poll:null, skew:0 };
+
+async function api(method, path, body){
+  const opt = { method, headers:{'Content-Type':'application/json'} };
+  if(method==='POST') opt.body = JSON.stringify(body||{});
+  const url = method==='GET' ? path+'?'+new URLSearchParams(body||{}) : path;
+  const r = await fetch(url, opt); return await r.json();
+}
+/* Which kind is decided by the button that opened the dialog, never by
+   anything inside it: the two rooms are different enough that the choice
+   belongs out on the page, where both are spelled out side by side. */
+let startKind = 'class';
+const START_WORDS = {
+  class: { title:'🏫 Classroom room', go:'New practice session →', label:'Class, e.g. 3E',
+           sub:'Yours alone — set the groups, try practice cards, vet the names.' },
+  hall:  { title:'🏟️ Hall room', go:'New hall room →', label:'Label, e.g. Hall',
+           sub:'Where every class meets for the mass game.' }
+};
+function openStart(kind){
+  startKind = kind;
+  const w = START_WORDS[kind];
+  $('dlgTitle').textContent = w.title; $('dlgSub').textContent = w.sub;
+  $('dlgNew').textContent = w.go; $('newLabel').placeholder = w.label;
+  dlgErr('');
+  $('startDlg').showModal();
+  /* The code field, not the class name: resuming is what a teacher holding a
+     printed room code came here to do, and it is the first thing on the form. */
+  $('reRoom').focus();
+}
+function closeStart(){ $('startDlg').close(); }
+/* One line inside the dialog instead of alert(): a teacher who mistyped the
+   host key keeps everything else they typed and fixes only that field. */
+function dlgErr(msg){
+  const e = $('dlgErr');
+  e.textContent = msg || ''; e.classList.toggle('hidden', !msg);
+}
+async function createRoom(){
+  const label = ($('newLabel')||{}).value || '';
+  /* Both kinds spelled out, not one shared shorthand — a classroom room is
+     the teacher's own, a hall room is where every class meets, and this is
+     the one place that choice is actually made. */
+  const body = startKind === 'hall' ? { kind:'hall', label } : { kind:'class', label };
+  let r = await api('POST','/api/host/create', body);
+  /* Never asked up front: a teacher opening their own classroom must not be
+     shown a passcode box at all, and a hall is opened once per event. Only
+     when the server says one is needed.
+
+     Same discipline as the admin-key prompt further down this file — the key
+     lives as a local variable and a POST body value, is never appended to a
+     URL, is never logged, and prompt()'s dialog leaves nothing on the page
+     once it closes. It stays a prompt() rather than a field in the dialog for
+     the same reason: a passcode typed into the page would sit in an input the
+     rest of the event could be shoulder-read from. */
+  if(r.error && /passcode/i.test(r.error)){
+    const key = prompt('Opening a hall needs the event passcode.');
+    if(key == null) return;              // cancelled — leave the console exactly as it was
+    r = await api('POST','/api/host/create', { ...body, key });
+  }
+  if(r.error) return dlgErr(r.error);
+  R.room = r.room; R.key = r.hostKey; R.kind = r.kind; closeStart(); go();
+}
+/* Resume used to switch screens on nothing but a four-character code, so a
+   mistyped host key dropped the teacher onto a console that quietly refused
+   every button. Ask the server who they are first — /api/host/roster is the
+   cheapest route that actually checks the key — and show it the room's own
+   words rather than inventing kinder ones. */
+async function resumeRoom(){
+  const room = $('reRoom').value.trim().toUpperCase(), key = $('reKey').value.trim();
+  if(room.length !== 4) return dlgErr('A room code is four characters.');
+  if(!key) return dlgErr('The host key is needed too — it is on your printed briefing sheet, or behind 👁 Show on the console that opened the room.');
+  dlgErr('');
+  const r = await api('POST','/api/host/roster',{ room, hostKey:key });
+  if(r.error) return dlgErr(r.error);
+  R.room = room; R.key = key; R.kind = r.kind; closeStart(); go();
+}
+/* Downloads the whole room. The server keeps it anyway, but a file on the
+   teacher's own laptop is what makes a two-day game safe to promise. */
+async function saveBackup(){
+  const r = await api('GET','/api/host/export',{ room:R.room, hostKey:R.key });
+  if(r.error) return alert(r.error);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(r.snapshot)], { type:'application/json' }));
+  a.download = r.file; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+}
+async function restoreBackup(input){
+  const f = input.files && input.files[0]; if(!f) return;
+  input.value = '';
+  let snap;
+  try{ snap = JSON.parse(await f.text()); }
+  catch(e){ return dlgErr('That file could not be read.'); }
+  let r = await api('POST','/api/host/import',{ snapshot:snap });
+  /* A room that has actually closed (its volume lost, an /admin wipe, or the
+     teacher's own Reset) needs the admin key to restore — host/import's own
+     cold-recovery guard (server.js) says so in exactly these words. The
+     common case is a still-open room, which needs nothing extra, so this
+     never asks up front — only once, and only when the server specifically
+     says a key is needed, never for an ordinary clash or a wrong host key.
+     The key exists only as a local variable and a POST body value: it is
+     never appended to a URL, never logged, and prompt()'s own dialog leaves
+     nothing behind on the page once it closes. */
+  if(r.error && /needs the admin key/i.test(r.error)){
+    const key = prompt('This room is closed. Restoring it needs the admin key.');
+    if(key == null) return; // teacher cancelled — leave the console exactly as it was
+    r = await api('POST','/api/host/import',{ snapshot:snap, key });
+  }
+  if(r.error) return dlgErr(r.error);
+  R.room = r.room; R.key = r.hostKey; closeStart(); go();
+  alert(`Room ${r.room} is back, with ${r.count} countries. Their country codes still work.`);
+}
+function go(){
+  $('setup').classList.add('hidden'); $('live').classList.remove('hidden');
+  /* The one place new, resumed and restored rooms all converge, so the one
+     place worth remembering from — see rememberHost(). */
+  rememberHost(R.room, R.key);
+  $('leaveBtn').classList.remove('hidden');
+  $('roomCode').textContent = R.room;
+  $('joinUrl').textContent = location.origin.replace(/^https?:\/\//,'') + '/play';
+  /* Everyone needs /play, whichever code they then type, so the QR is the one
+     thing on this card that is useful in every room and every phase. Rendered
+     once here rather than on the poll — the URL cannot change under a live
+     room. Guarded the same way index.html guards its own: a file:// console
+     has origin 'null', and QR.render() hides itself if it cannot encode. */
+  if(window.QR && location.origin && location.origin !== 'null')
+    QR.render($('joinQr'), location.origin + '/play', { label:'QR code for the join page' });
+  /* The key is NOT painted here any more — it lives in #hostKey, masked. */
+  paintHostKey();
+  /* Print-only heading — no host key, ever. tick() (below) fetches the
+     roster on its own first pass, so it — not this function — is the only
+     place that call is made; a second call here bought nothing but a
+     duplicate POST on every load. */
+  $('printRoom').textContent = `Room code: ${R.room}`;
+  /* Resume then Restore in the same page load must not let a roster from
+     the FIRST room survive renderRoster()'s unchanged-signature skip just
+     because the second room's roster happens to serialise identically
+     (same slot count, same "not started" placeholders) — reset the
+     signature on every fresh go(), not just on an actual roster change. */
+  roomSig = '';
+  renderScens(); tick(); R.poll = setInterval(tick, 2200);
+}
+
+const LAND = {};
+HOMELANDS.forEach(h => LAND[h.key] = h.name);
+
+/* The server refuses a blank/non-numeric field, but a deliberate smaller
+   number is a real instruction — and a more destructive one than remove or
+   reopen, which are already confirmed: typing 6 over 17 silently deletes 11
+   leader codes and 11 class codes in one Set. */
+async function setGroups(){
+  const n = Number($('nGroups').value)||0;
+  const drop = lastRoster.length - n;
+  if(drop > 0 && !confirm(
+    `This sets the room to ${n} group${n===1?'':'s'} — removing ${drop} group${drop===1?'':'s'} ` +
+    `and deleting ${drop} leader and ${drop} class code${drop===1?'':'s'}. Any group that has already ` +
+    `started keeps its slot; only empty ones are removed. Continue?`
+  )) return;
+  const r = await api('POST','/api/host/groups',{ room:R.room, hostKey:R.key, n });
+  if(r.error) return alert(r.error);
+  renderRoster(r.roster, R.kind);
+}
+/* Fetches the roster for whichever kind of room this is — host/roster answers
+   for a hall room too, and that reply is the only place R.kind gets set after
+   Resume or Restore, which hand back only a room code and a host key. Called
+   every tick (below) rather than gated on R.kind, so a hall's roster keeps up
+   as committed countries migrate in — a classroom-only gate here would leave
+   the hall's own console blind to arrivals. */
+async function refreshRoster(){
+  const r = await api('POST','/api/host/roster',{ room:R.room, hostKey:R.key });
+  if(r.error) return;
+  R.kind = r.kind; R.label = r.label; R.openJoin = r.openJoin;
+  $('printLabel').textContent = r.label ? r.label : 'Republic 2126';
+  $('rescueCard').classList.toggle('hidden', r.kind !== 'hall');
+  $('roundBtn').classList.toggle('hidden', r.kind !== 'hall');
+  $('yieldBtn').classList.toggle('hidden', r.kind !== 'class');
+  /* "practice cards left: 3" is from before there were three of anything. There
+     is one drill, so this says whether it is still to come or already done. */
+  $('pracLeft').textContent = r.kind !== 'class' ? ''
+    : (r.practiceLeft > 0 ? '🎴 test scenario: not run yet' : '🎴 test scenario: done');
+  $('openJoinBtn').textContent = r.openJoin ? 'Stop open joining' : 'Allow open joining';
+  renderRoster(r.roster, r.kind);
+}
+/* The rollback lever is scoped to a classroom room on purpose (see #joinRow
+   below, toggled with everything else in renderRoster): a hall's own console
+   is projected in front of the whole cohort with its room code on screen —
+   flipping openJoin there would let anyone in earshot mint a country by
+   typing that code back in, exactly the hole Tasks 4 and 12 closed. */
+async function toggleOpenJoin(){
+  const r = await api('POST','/api/host/act',{ room:R.room, hostKey:R.key, act:'openjoin' });
+  if(r.error) return alert(r.error);
+  refreshRoster();
+}
+/* Printed and read aloud, so it stays a plain table: both codes, homeland,
+   name, state.
+
+   Slots are numbered per classroom and deliberately never renumbered (see
+   host/groups on the server) — three classes of seventeen groups would print
+   three "Group 1"s side by side in a hall. A hall roster only ever lists
+   countries that have actually arrived (an empty slot has nothing to show
+   there), so every row already has a name — the hall keys each row on that
+   name instead of a slot number, and never prints a bare digit that could
+   collide with another class's. A classroom keeps slot numbers, because
+   there the number IS the label already on the printed sheet, read aloud
+   before a country has a name at all.
+
+   A hall roster is also sorted by name, not by the slot numbers rosterOf()
+   still returns — a fifty-country hall would otherwise list three "slot 1"s
+   first and thirty-odd duplicates after, in an order that looks random right
+   when a teacher most needs to find one group fast. A filter box (#filterRow,
+   hall only) narrows the same list further by name or code. */
+let lastRoster = [];
+function labelFor(code){
+  const t = lastRoster.find(x => x.code === code);
+  if(!t) return 'this group';
+  if(t.name) return t.name;
+  return R.kind === 'class' ? `Group ${t.slot}` : 'this group';
+}
+function filterRoster(){ renderRoster(lastRoster, R.kind); }
+
+/* ---- the host key, masked -----------------------------------------------
+   This console is projected, and it shows the room code in huge type because
+   students need it. The host key beside it gates seven routes, one of which is
+   act:'reset' — dropRoom(), the end of the hall. Both halves of the credential
+   on the wall, all event, in front of 300 phone cameras.
+
+   Masked, revealed fifteen seconds at a time. The auto-hide is the feature:
+   a game master who reveals it and is then pulled into a rescue is the
+   realistic failure, so leaving it up has to be impossible rather than merely
+   discouraged. Never revealed by default, and never remembered across a
+   reload — unlike the room itself, which is remembered on purpose.
+
+   The key is unchanged and still recoverable: it is on the teacher briefing
+   sheet, and /api/admin/key returns it from /admin. */
+const KEYFOR = 15000;
+let KEYUNTIL = 0;
+
+/* Seconds of reveal left, 0 when masked. Bounded above by the window itself so
+   a laptop waking from sleep and resyncing its clock backwards cannot strand
+   the key on screen for longer than it was ever meant to show. */
+function hostKeyLeft(now, until){
+  if(!until) return 0;
+  const ms = until - now;
+  if(ms <= 0) return 0;
+  /* KEYFOR is milliseconds and this returns seconds — clamping against the raw
+     constant compares 15000 to 75 and bounds nothing at all. */
+  return Math.min(KEYFOR / 1000, Math.ceil(ms / 1000));
+}
+function paintHostKey(){
+  const box = $('hostKey'); if(!box) return;
+  if(!R.key){ box.innerHTML = ''; return; }
+  const left = hostKeyLeft(Date.now(), KEYUNTIL);
+  /* Lapsed — clear it so the once-a-second repaint below stops, rather than
+     rewriting the same masked pill for the rest of the event. */
+  if(!left) KEYUNTIL = 0;
+  box.innerHTML = left
+    ? `<span class="pill">host key <b>${esc(R.key)}</b> <span class="sub">${left}s</span></span>
+       <button class="sm" onclick="toggleHostKey()" title="Hide it again now">🙈 Hide</button>`
+    : `<span class="pill">host key <b>••••••••</b></span>
+       <button class="sm" onclick="toggleHostKey()" title="Show the host key for ${KEYFOR/1000} seconds — this screen is projected">👁 Show</button>`;
+}
+function toggleHostKey(){
+  KEYUNTIL = hostKeyLeft(Date.now(), KEYUNTIL) ? 0 : Date.now() + KEYFOR;
+  paintHostKey();
+}
+
+/* ---- staying in the room across a reload --------------------------------
+   A game master whose laptop sleeps, or who hits refresh mid-event, used to
+   land back on the start screen and have to retype a four-letter room code
+   and an eight-character host key in front of the whole cohort.
+
+   Storage, and deliberately NOT the URL the student app uses. A host key
+   authorises remove, reopen and reset; this console is projected; and URLs
+   persist in browser history that syncs across signed-in devices. The key
+   stays out of the address bar, and forgetHost() is a way to take it off a
+   borrowed laptop on purpose.
+
+   Every path swallows. This ran at page init, and a page that throws at init
+   is how this console died once already. */
+const HOSTKEY = 'r2126.host';
+function rememberHost(room, key){
+  try { localStorage.setItem(HOSTKEY, JSON.stringify({ room, key })); }
+  catch (e) { /* private mode — the room still works, it just will not
+                 survive a reload */ }
+}
+function forgetHost(){
+  try { localStorage.removeItem(HOSTKEY); }
+  catch (e) { /* nothing stored is the state we wanted anyway */ }
+}
+/* null unless BOTH halves are there. A half-written value would fire a roster
+   call with an undefined credential and bounce the game master to the setup
+   screen with an error, which is worse than simply starting there. */
+function storedHost(){
+  try {
+    const raw = localStorage.getItem(HOSTKEY);
+    if(!raw) return null;
+    const v = JSON.parse(raw);
+    if(!v || !v.room || !v.key) return null;
+    return { room:v.room, key:v.key };
+  } catch (e) { return null; }
+}
+
+/* Leaves the room on THIS laptop only. The room itself is untouched and
+   still running — this is not reset, and the wording says so. Reloading
+   afterwards is the simplest way to be sure no poll, timer or roster from
+   the old room is still in flight. */
+function leaveRoom(){
+  if(!confirm('Leave this room on this laptop?\n\nThe room keeps running and every country stays in it. You will need the room code and host key to come back.')) return;
+  forgetHost();
+  location.reload();
+}
+
+/* Back into the room the laptop was already in, without retyping anything.
+
+   Verified before it is trusted, with the same roster call resumeRoom() uses:
+   a stored room can be gone, wiped from /admin, or carrying a key that no
+   longer matches. Anything short of a clean answer clears the memory and
+   leaves the game master on the start screen, which is where they would have
+   been anyway — never on an error they cannot act on. */
+async function resumeStoredRoom(){
+  const v = storedHost();
+  if(!v) return;
+  let r;
+  try { r = await api('POST','/api/host/roster',{ room:v.room, hostKey:v.key }); }
+  catch (e) { return; }          /* offline at boot — leave the memory alone */
+  if(!r || r.error) return forgetHost();
+  R.room = v.room; R.key = v.key; R.kind = r.kind;
+  go();
+}
+
+/* ---- folding the Groups card -------------------------------------------
+   No other page in this project touches localStorage, and it throws outright
+   in some Safari privacy modes. An uncaught throw at page init would take the
+   whole console down — the same failure the vote screen's identifier
+   collision caused — so both directions swallow. A storage that will not
+   store degrades to "does not remember", never to a dead page. */
+const FOLDKEY = 'r2126.rosterFolded';
+function rosterFolded(){
+  try { return localStorage.getItem(FOLDKEY) === '1'; }
+  catch (e) { return false; }
+}
+function setRosterFolded(v){
+  try { localStorage.setItem(FOLDKEY, v ? '1' : '0'); }
+  catch (e) { /* private mode, or storage full — the fold still works, it
+                 just will not survive a reload */ }
+}
+/* Re-applied after every render, not only on load: renderRoster replaces the
+   list's contents on each poll, and a card that unfolded itself once a second
+   would be worse than no control at all. */
+function paintRosterFold(){
+  const folded = rosterFolded();
+  const card = $('rosterCard'); if(!card) return;
+  card.classList.toggle('folded', folded);
+  const b = $('foldBtn');
+  if(b){ b.textContent = folded ? '▸' : '▾'; b.setAttribute('aria-expanded', String(!folded)); }
+}
+function toggleRoster(){
+  setRosterFolded(!rosterFolded());
+  paintRosterFold();
+}
+let roomSig = '';
+function renderRoster(roster, kind){
+  $('rosterCard').classList.remove('hidden');
+  lastRoster = roster;
+  const isClass = kind === 'class';
+  $('groupsRow').classList.toggle('hidden', !isClass);
+  $('joinRow').classList.toggle('hidden', !isClass);
+  $('filterRow').classList.toggle('hidden', isClass);
+  let list = isClass ? roster : roster.filter(t => String(t.name||'').trim());
+  if(!isClass) list = list.slice().sort((a,b) => (a.name||'').localeCompare(b.name||''));
+  const q = isClass ? '' : ($('rosterFilter').value||'').trim().toLowerCase();
+  /* A lost slip on hall day is a ministry code, not always the leader or
+     class one — rosterOf() (server.js) already hands this console all four
+     minCodes so it can read one out, and the filter has to be able to find
+     the group it belongs to the same way it already finds a leader or class
+     code. */
+  if(q) list = list.filter(t =>
+    (t.name||'').toLowerCase().includes(q) ||
+    (t.code||'').toLowerCase().includes(q) ||
+    (t.viewCode||'').toLowerCase().includes(q) ||
+    Object.values(t.minCodes||{}).some(c => (c||'').toLowerCase().includes(q)));
+  const done = list.filter(t=>t.locked).length;
+  $('commitCount').textContent = isClass
+    ? `${done} / ${list.length} committed`
+    : `${list.length} arrived${q ? ' (filtered)' : ''}`;
+  /* A checklist, not a switch: greyed until every provisioned group has
+     committed itself, and pressing it (finishSession, below) still cannot
+     lock or delete a single country — see host/act's 'finish' branch. */
+  $('finishBtn').disabled = !isClass || !list.length || done < list.length;
+  /* A hall's roster is rebuilt every ~2.2s as countries migrate in. Without
+     this, a teacher's cursor moving toward 🔓 on row 12 could have row 12
+     become a different country between render and click, purely from the
+     poll — a signature check skips the rebuild (and the button churn under
+     the cursor) whenever the visible list has not actually changed. */
+  const sig = kind + '|' + q + '|' + JSON.stringify(list);
+  if(sig === roomSig) return;
+  roomSig = sig;
+  $('roster').innerHTML = list.map(t => `
+    <div class="lb" style="align-items:center">
+      <div class="rank">${isClass ? t.slot : '🌍'}</div>
+      <div style="flex:1">
+        <b>${isClass ? (t.name ? esc(t.name) : '<span class="sub">not started</span>') : esc(t.name)}</b>
+        ${t.locked?'🔒':''} ${t.renameAsked?'↩️':''}
+        <div class="sub">leader <code class="rc">${esc(t.code)}</code> · class <code class="cc">${esc(t.viewCode)}</code> · ${esc(LAND[t.homeland]||t.homeland)}</div>
+        ${t.minCodes ? `<div class="sub">${ROLES.filter(r=>r.key!=='leader').map(r=>
+          `${r.icon} <code class="mc">${esc(t.minCodes[r.key]||'')}</code>`).join(' · ')}</div>` : ''}
+      </div>
+      <div class="row" style="gap:6px">
+        <button class="sm" onclick="renameCountry('${t.code}')" title="Rename">✏️</button>
+        ${isClass?`<button class="sm" onclick="askRenameCountry('${t.code}')" title="Ask them to choose a different name">↩️</button>`:''}
+        <button class="sm" onclick="reopenCountry('${t.code}')" title="Reopen for editing">🔓</button>
+        ${(isClass || !t.name)?`<button class="sm" onclick="removeCountry('${t.code}')" title="${t.name?'Remove this group and its country':'Remove this empty group'}">🗑️</button>`:''}
+      </div>
+    </div>`).join('');
+}
+async function modCountry(code, act, name){
+  const r = await api('POST','/api/host/country',{ room:R.room, hostKey:R.key, code, act, name });
+  if(r.error) return alert(r.error);
+  renderRoster(r.roster, R.kind);
+}
+function renameCountry(code){
+  const name = prompt('New name for this country:');
+  if(name && name.trim()) modCountry(code, 'rename', name.trim());
+}
+/* remove deletes a group's codes for good, reopen unlocks a country the class
+   already agreed was committed, and askRename clears a committed group's name
+   and unlocks it too (server.js: team.name='', team.locked=false) — losing
+   that name is also what makes 🗑️ appear on the row next. All three are one
+   tap on a console a teacher is using live, in front of a class, so all three
+   are confirmed, and every confirm captures its label (labelFor(code)) BEFORE
+   the action runs, never after — so it always names the actual country, not
+   whatever the row says once the action has already emptied it. */
+function askRenameCountry(code){
+  if(!confirm(`Ask ${labelFor(code)} to choose a different name? This clears its name and reopens it for editing.`)) return;
+  modCountry(code, 'askRename');
+}
+/* A group that has built something loses more than a row, so the question says
+   so — a country that never started is just an empty slot and does not need
+   the same warning. Both are captured before the action runs, like the rest of
+   these confirmations, so the name is the one on screen. */
+function removeCountry(code){
+  const t = (lastRoster||[]).find(x => x.code === code);
+  const msg = t && String(t.name||'').trim()
+    ? `Remove ${labelFor(code)} for good? Its country — flag, ministers, points, buildings — goes with it, and both its codes stop working. This cannot be undone.`
+    : `Remove ${labelFor(code)} for good? This deletes its leader and class codes — it cannot be undone.`;
+  if(!confirm(msg)) return;
+  modCountry(code, 'remove');
+}
+function reopenCountry(code){
+  const label = labelFor(code);
+  const msg = R.kind === 'hall'
+    ? `Reopen ${label} for editing? It will need to commit again to count.`
+    : `Reopen ${label}? It will need to commit again before it can join the hall.`;
+  if(!confirm(msg)) return;
+  modCountry(code, 'reopen');
+}
+async function pullIn(){
+  const code = $('pullCode').value.trim().toUpperCase();
+  if(code.length !== 5) return alert('Leader codes are 5 letters.');
+  const r = await api('POST','/api/host/country',{ room:R.room, hostKey:R.key, code, act:'pull' });
+  if(r.error) return alert(r.error);
+  $('pullCode').value = ''; tick();
+}
+/* A checklist, not an action: it only shows the handover instructions and
+   records a feed line (host/act's 'finish' branch) — it destroys nothing and
+   locks nothing further. The room stays open exactly as it was. */
+async function finishSession(){
+  const r = await api('POST','/api/host/act',{ room:R.room, hostKey:R.key, act:'finish' });
+  if(r.error) return alert(r.error);
+  tick();
+  alert(`Every group is committed.\n\nOn the day, tell them:\n` +
+        `1. Open ${location.origin.replace(/^https?:\/\//,'')}/play\n` +
+        `2. Type your leader code\n` +
+        `3. Type the hall room code on the screen\n\n` +
+        `This room stays open — you can reopen a country any time.`);
+}
+/* ---- the open card as a front page, over the projected console ----
+
+   Raised automatically the moment a card is thrown, because this console is
+   the screen at the front of the room. Dismissing it is LOCAL: the card stays
+   open on every phone and the room keeps deciding — the teacher just wants the
+   controls back to watch "3/6 decided". Only "Close card for everyone" ends it.
+
+   R._cardUp   the card key currently on screen, or null
+   R._cardOff  a key the teacher dismissed, so the 2.2s poll does not raise it
+               again a moment later
+
+   The words are set before the photograph is requested and never wait on it:
+   if /api/card-art 404s (the classroom drill has no picture) or is slow,
+   onerror hides the <img> and the headline stands on the gradient alone. */
+function renderHostCard(d){
+  const card = d.card || null;
+  const bar  = $('showCardBtn');
+  if(!card){                                  /* nothing open — clear everything */
+    R._cardUp = R._cardOff = null;
+    $('hcard').classList.remove('on');
+    bar.classList.add('hidden');
+    return;
+  }
+  if(R._cardOff === card.key){                /* dismissed: offer it back, quietly */
+    bar.classList.remove('hidden');
+    return;
+  }
+  bar.classList.add('hidden');
+  if(R._cardUp === card.key) return;          /* already up — do not repaint on every poll */
+  R._cardUp = card.key;
+  paintHostCard(card);
+}
+function paintHostCard(card){
+  const img = $('hcardImg');
+  $('hcardTitle').textContent = card.title || '';
+  $('hcardStory').textContent = card.story || '';
+  img.classList.remove('gone');
+  img.onerror = () => img.classList.add('gone');
+  /* The key rides along only as a cache-buster — cardArt() reads room.scenario
+     and ignores it, which is what stops the deck being readable ahead of time. */
+  img.src = `/api/card-art?room=${encodeURIComponent(R.room)}&card=${encodeURIComponent(card.key)}`;
+  $('hcard').classList.add('on');
+}
+/* Local only. The card is still open, and every phone still shows it. */
+function hideCard(){
+  R._cardOff = R._cardUp;
+  R._cardUp = null;
+  $('hcard').classList.remove('on');
+  $('showCardBtn').classList.remove('hidden');
+}
+function showCard(){
+  const card = R.data && R.data.card; if(!card) return;
+  R._cardOff = null;
+  R._cardUp = card.key;
+  $('showCardBtn').classList.add('hidden');
+  paintHostCard(card);
+}
+/* The real thing: ends the card for the whole room, exactly as the console's
+   own Close card button does. */
+async function closeCardFromOverlay(){
+  $('hcard').classList.remove('on');
+  R._cardUp = R._cardOff = null;
+  await act('clear');
+}
+
+/* Spec D. The roll under the headline — who was hit, and who held the line.
+   The second half is the point: two well-defended countries named on a wall in
+   front of everyone is the clearest argument for spending on Defence this game
+   can make, and it is worth more than the arithmetic above it. */
+function strikeRoll(hits){
+  /* Same wording server.js settles on for the log line, the appeal line and
+     strikeFeedLines (lostHomesPhrase / its inlined twin) — this page has no
+     way to import that helper, so the text is kept in sync by hand. Four
+     sites used to phrase this differently, and none of them pluralised: "1
+     people lost their homes" was what a lightly-defended country read on the
+     wall in front of the room. */
+  return (hits||[]).map(h => h.held
+    ? `<div class="held">🛡️ <b>${esc(h.name)}</b> — held the line. Nothing lost.</div>`
+    : `<div>💔 <b>${esc(h.name)}</b> — ${h.displaced === 1 ? '1 person lost their home' : `${h.displaced} people lost their homes`}, ${h.coins} coins gone.</div>`
+  ).join('');
+}
+
+/* Paints once per strike, not once per 2.2-second poll — keyed on `at`, which
+   the server stamps once per throw. Same shape as renderHostCard's _cardUp
+   guard, deliberately NOT the same state: this must never reach into the card
+   overlay, because a strike thrown mid-card must not dismiss the card. */
+function renderHostStrike(d){
+  const ls = d && d.lastStrike;
+  if(!ls || !ls.at) return;
+  /* room.lastStrike is never cleared — not by clear, not by advanceRound, not
+     at final — and it survives a server restart via snapshot(). On a FRESH
+     page load R._strikeUp is undefined, so without this check the very first
+     tick after any console reload would raise whatever strike is sitting in
+     lastStrike, however old, full-screen over the projected leaderboard. A
+     teacher's first instinct when a console misbehaves is to refresh; this is
+     what stops that refresh from putting a four-round-old disaster back on
+     the wall in front of the room. Above the _strikeUp check on purpose: a
+     stale strike must never auto-raise, whether or not this device has ever
+     seen it. showStrike() (the manual "Show the strike again" button)
+     bypasses renderHostStrike entirely, so it is untouched by this guard and
+     can still show a stale strike on purpose. */
+  if(ls.round !== d.round){ R._strikeOff = ls.at; return; }
+  if(R._strikeOff === ls.at) return;      /* dismissed by hand: leave it down */
+  if(R._strikeUp === ls.at) return;       /* already up: do not repaint */
+  R._strikeUp = ls.at;
+  paintHostStrike(ls);
+}
+
+/* Every raise passes through here — the auto-raise in renderHostStrike AND
+   the manual re-raise in showStrike() — so the "Show the strike again"
+   button is hidden right here, in the one place that cannot be missed by a
+   future caller. Without this, dismissing a strike and then letting a NEW
+   one auto-raise on the next poll leaves the button on screen claiming the
+   overlay is down while it is up in front of the room (fix round 1). */
+function paintHostStrike(ls){
+  $('hstrikeIcon').textContent  = ls.icon || '';
+  $('hstrikeTitle').textContent = ls.title || '';
+  $('hstrikeStory').textContent = ls.line || '';
+  $('hstrikeRoll').innerHTML    = strikeRoll(ls.hits);
+  $('hstrike').classList.add('on');
+  $('showStrikeBtn').classList.add('hidden');
+}
+
+/* Local only, exactly like hideCard(): the strike already happened and cannot
+   be un-thrown. This puts the console back, and nothing else. */
+function hideStrike(){
+  R._strikeOff = R._strikeUp;
+  R._strikeUp = null;
+  $('hstrike').classList.remove('on');
+  $('showStrikeBtn').classList.remove('hidden');
+}
+
+function showStrike(){
+  const ls = R.data && R.data.lastStrike; if(!ls) return;
+  R._strikeOff = null;
+  R._strikeUp = ls.at;
+  paintHostStrike(ls);      /* also hides showStrikeBtn — see paintHostStrike */
+}
+
+/* ---- how the hall voted ------------------------------------------------
+   Fetched once, when the screen is opened, rather than polled: the numbers
+   cannot change after the game has been called, and the console is already
+   polling once a second for everything else. */
+let VOTES = null, VOTEAT = 0;
+
+/* A bar's width as a share of the whole room, NOT of the biggest bar on the
+   card. Proportional to the largest bar would rescale the chart between
+   cards, so nineteen would look like a landslide on one screen and a
+   minority on the next — which is the opposite of what stepping through is
+   for. Pinned by tests/hall-results-screen.test.js. */
+function barPct(n, total){
+  if(!total) return 0;
+  return n / total * 100;
+}
+
+async function showResults(){
+  const r = await api('GET','/api/host/results',{ room:R.room, hostKey:R.key });
+  if(r.error) return alert(r.error);
+  VOTES = r.cards || []; VOTEAT = 0;
+  $('hres').classList.add('on');
+  paintResults();
+}
+function hideResults(){
+  $('hres').classList.remove('on');
+  VOTES = null;
+}
+function stepResults(d){
+  if(!VOTES || !VOTES.length) return;
+  VOTEAT = Math.max(0, Math.min(VOTES.length - 1, VOTEAT + d));
+  paintResults();
+}
+function paintResults(){
+  if(!VOTES || !VOTES.length){
+    $('hresTitle').textContent = 'No decisions were recorded';
+    $('hresRound').textContent = '';
+    $('hresBody').innerHTML =
+      '<div id="hresEmpty">This room played no scenario cards, or it was restarted before they were saved.</div>';
+    $('hresCount').textContent = '';
+    return;
+  }
+  const c = VOTES[VOTEAT];
+  $('hresTitle').textContent = c.icon + '  ' + c.title;
+  $('hresRound').textContent = 'Round ' + c.round + ' · ' + c.total + ' countries';
+  const row = (icon, label, n, none) =>
+    `<div class="hresRow${none ? ' none' : ''}">
+       <div class="hresLab"><span>${icon}</span><span>${esc(label)}</span><b>${n}</b></div>
+       <div class="hresTrack"><div class="hresFill" style="width:${barPct(n, c.total)}%"></div></div>
+     </div>`;
+  $('hresBody').innerHTML =
+    c.choices.map(ch => row(ch.icon, ch.label, ch.count, false)).join('') +
+    row('⏱️', 'Could not agree in time', c.undecided, true);
+  $('hresCount').textContent = (VOTEAT + 1) + ' of ' + VOTES.length;
+}
+/* Arrow keys as well as the buttons: at the front of a hall the laptop is
+   usually an arm's length away and a clicker sends arrow keys. Bound only
+   while the screen is up, and Escape closes it. */
+document.addEventListener('keydown', e => {
+  if(!VOTES) return;
+  if(e.key === 'ArrowRight'){ e.preventDefault(); stepResults(1); }
+  else if(e.key === 'ArrowLeft'){ e.preventDefault(); stepResults(-1); }
+  else if(e.key === 'Escape'){ e.preventDefault(); hideResults(); }
+});
+
+async function act(a, phase, key){
+  const r = await api('POST','/api/host/act',{ room:R.room, hostKey:R.key, act:a, phase, key });
+  if(r.error) return alert(r.error);
+  tick();
+}
+async function setTimer(secs){
+  const r = await api('POST','/api/host/act',{ room:R.room, hostKey:R.key, act:'timer', secs });
+  if(r.error) return alert(r.error);
+  tick();
+}
+/* The clock is redrawn locally every second rather than waiting on the poll —
+   a countdown that jumps in four-second steps is worse than none. The room
+   poll only ever supplies a new end time; the counting is done here.
+   R.skew is the gap between this laptop's clock and the server's, so a console
+   whose time is minutes out still shows the same number as the students. */
+function drawClock(){
+  const d = R.data; if(!d) return;
+  const bar = $('timerBar'), clock = $('clock');
+  bar.classList.toggle('hidden', d.phase !== 'game');
+  if(d.phase !== 'game') return;
+  if(!d.timerEndsAt){
+    clock.textContent = d.timerSecs ? fmt(d.timerSecs) : '—';
+    clock.style.color = 'var(--dim)';
+    $('timerHint').textContent = d.timerSecs
+      ? `${fmt(d.timerSecs)} starts automatically on the next card.`
+      : 'No clock. Pick a length and every card you throw will start it.';
+    $('undecided').textContent = '';
+    return;
+  }
+  const left = Math.max(0, Math.round((d.timerEndsAt - (Date.now() - R.skew)) / 1000));
+  clock.textContent = left ? fmt(left) : "TIME'S UP";
+  clock.style.color = left === 0 ? 'var(--red)' : left <= 15 ? 'var(--gold)' : 'var(--ink)';
+  const undecided = d.count - d.decided;
+  $('undecided').innerHTML = undecided
+    ? `<span style="color:${left===0?'var(--red)':'var(--dim)'}">${undecided} still deciding</span>`
+    : '<span style="color:var(--grn)">everyone has decided</span>';
+  $('timerHint').textContent = left === 0
+    ? 'Nothing advances on its own — press Next round when you are ready. Countries that never decided lose Stability and Harmony.'
+    : '';
+}
+function fmt(s){ return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0'); }
+setInterval(drawClock, 1000);
+/* Its own interval, not a line inside drawClock: that function returns early
+   outside the game phase, so a countdown living there would freeze in prep and
+   in final — and keeping them separate means neither can ever break the other.
+   The clock is what a hall is run by; it does not share a timer with anything.
+   Only repaints while a reveal is actually running. */
+setInterval(() => { if(KEYUNTIL) paintHostKey(); }, 1000);
+/* A hall picks from the deck. A classroom does not pick at all: it gets one
+   drill, and choosing which card to run was judged confusing — a teacher's job
+   here is to get countries built and committed, not to plan a lesson. So the
+   classroom sees one button, and it stays disabled until every group in the
+   room has committed. */
+/* key → "icon title" for the cards currently on the list, refilled on every
+   fetch. Only ever read to word the confirmation. */
+let DECK = {};
+function renderScens(){
+  if(R.kind === 'class'){
+    $('scenHead').textContent = '🎴 Test scenario';
+    $('deckResetBtn').classList.add('hidden');   // a classroom has one drill, not a deck
+    $('scenHint').textContent =
+      'One practice card, once every group has committed. It shows them exactly what happens in the hall, and costs them nothing — their meters go back when you close it.';
+    $('scenList').innerHTML =
+      `<button class="p" id="drillBtn" onclick="act('scenario')">Run the test scenario</button>
+       <div class="sub" id="drillNote"></div>`;
+    return;
+  }
+  /* A hall has no deck on this device — the cards live on the server. It asks
+     for titles, and gets titles: the stories stay there, so that nobody standing
+     at the console, or reading it over a shoulder, learns the hall's cards
+     before they are dealt. */
+  api('GET','/api/host/scenarios',{ room:R.room, hostKey:R.key }).then(r=>{
+    if(r.error){ $('scenList').innerHTML = `<div class="sub">${esc(r.error)}</div>`; return; }
+    /* A thrown card is gone from this list, so what is on screen is always
+       "still to come". The reset only appears once something has actually been
+       thrown — nothing extra on a projected screen at the start of an event. */
+    $('deckResetBtn').classList.toggle('hidden', !(r.used > 0));
+    /* Titles are held here rather than passed through an onclick attribute: a
+       card title is free text from the deck, and interpolating it into an HTML
+       attribute is exactly how a stray quote breaks the handler. */
+    DECK = {}; r.cards.forEach(s => { DECK[s.key] = `${s.icon} ${s.title}`; });
+    $('scenList').innerHTML = r.cards.length
+      ? r.cards.map(s=>
+          `<div class="scen" id="sc_${s.key}" onclick="throwScen('${s.key}')">
+             <b>${esc(s.icon)} ${esc(s.title)}</b></div>`).join('')
+      : `<div class="sub">Every card has been thrown. Press ↺ Show all cards again to bring them back.</div>`;
+  });
+}
+/* Dealing a card interrupts the whole hall, so it asks first. Naming the card
+   in the question gives nothing away: the title is on every screen in the room
+   the moment it is dealt. */
+async function throwScen(key){
+  if(!confirm(`Throw "${DECK[key] || 'this card'}" to every country?`)) return;
+  await act('scenario', null, key);
+  renderScens();          // whatever was just dealt is now off the list
+}
+async function resetDeck(){
+  if(!confirm('Bring every scenario card back onto the list?')) return;
+  await act('deckreset');
+  renderScens();
+}
+/* Spec D. The kinds are NOT listed here — hall-scenarios.js is server-only and
+   the console must not carry the copy either, because this page is projected.
+   The four keys and their icons are all the picker needs; the title and story
+   arrive with room.lastStrike after the throw. */
+const STRIKE_KINDS = [['raid','☠️','Attack'],['flood','🌊','Flood'],['haze','🌫️','Haze'],['unrest','⚡','Unrest']];
+let STRIKE_KIND = 'raid';
+/* Fix round 1. renderStrikePicker runs from tick(), every ~2.2s, and
+   rebuilds #strikeWho from the live board on every one of those polls —
+   the board carries coins and meters that never sit still, so there is no
+   change-guard that would hold. A checkbox is a fresh DOM node each time,
+   with no memory of its own, so a game master who ticks three countries and
+   pauses to read the names aloud loses the lot to the next poll, silently.
+   The fix is the same shape renderScens() already uses for R._scensKind:
+   move the fact that matters into module state that survives a rebuild, and
+   have the render apply it rather than own it. Which pids are ticked lives
+   here, not in the DOM. */
+const STRIKE_SELECTED = new Set();
+function toggleStrikePid(pid, checked){
+  if(checked) STRIKE_SELECTED.add(pid); else STRIKE_SELECTED.delete(pid);
+}
+
+function pickStrikeKind(k){ STRIKE_KIND = k; renderStrikePicker(R.data); }
+
+function renderStrikePicker(d){
+  /* Hall only, and only during the mass game — the same two conditions the
+     server enforces. This keeps the control off a projected wall where it
+     cannot be used; the server is what actually refuses. */
+  const on = d && d.kind !== 'class' && d.phase === 'game';
+  $('strikeCard').classList.toggle('hidden', !on);
+  if(!on) return;
+  /* STRIKE_KIND only changes on a click (pickStrikeKind, which re-renders
+     itself), never on a poll — unlike #strikeWho below, a plain equality
+     guard holds here and skips rebuilding four rows of markup 27 times a
+     minute for no reason. R._strikeKindShown, not a fresh top-level `let`,
+     for the same reason R._scensKind lives on R rather than its own name:
+     one more global on a page that inlines the whole engine is one more
+     chance at the SyntaxError this page has already died of once. */
+  if(R._strikeKindShown !== STRIKE_KIND){
+    R._strikeKindShown = STRIKE_KIND;
+    $('strikeKinds').innerHTML = STRIKE_KINDS.map(([k,ic,nm]) =>
+      `<div class="tab ${STRIKE_KIND===k?'on':''}" onclick="pickStrikeKind('${k}')">${ic} ${nm}</div>`).join('');
+  }
+  const rows = (d.board||[]);
+  /* checked is read from STRIKE_SELECTED, never from the checkbox that is
+     about to be thrown away — see the comment on STRIKE_SELECTED above.
+     onchange reads pid off `this.value` rather than a pid re-interpolated
+     into the handler string, so nothing about a country's identity has to
+     be escaped for JS-string context here, only for the HTML attribute it
+     already goes through via esc(). A country that leaves the room simply
+     stops getting a row — its pid, if still in the set, matches nobody the
+     next time a strike is thrown (server.js filters targets by pid), so
+     there is nothing here that needs to prune it out. */
+  $('strikeWho').innerHTML = rows.length
+    ? rows.map(r => `<label class="row" style="gap:8px;align-items:center">
+        <input type="checkbox" class="strikePid" value="${esc(r.pid)}" ${STRIKE_SELECTED.has(r.pid)?'checked':''}
+               onchange="toggleStrikePid(this.value,this.checked)" style="width:16px;height:16px">
+        ${esc(r.name)} ${r.displaced ? `<span class="sub">${esc(r.strk)} ${r.displaced} displaced</span>` : ''}
+      </label>`).join('')
+    : '<div class="sub">No countries in the hall yet.</div>';
+  const hurt = rows.filter(r => r.displaced > 0);
+  $('strikeNow').textContent = hurt.length
+    ? 'Still recovering: ' + hurt.map(r => `${r.name} (${r.displaced})`).join(', ')
+    : '';
+}
+
+async function throwStrike(){
+  const pids = [...STRIKE_SELECTED];
+  const random = Math.max(0, Math.floor(Number($('strikeRandom').value) || 0));
+  /* throwScen and resetDeck both confirm() first (see either, just above the
+     scenario picker) — a card can be reread and a deck reset undoes itself,
+     but a strike cannot be un-thrown, and it is the one irreversible action
+     on this whole console. Same wording style as those two neighbours. */
+  const kindName = (STRIKE_KINDS.find(k => k[0] === STRIKE_KIND) || [,,'this kind'])[2];
+  const who = pids.length ? `${pids.length} selected ${pids.length === 1 ? 'country' : 'countries'}`
+                           : `${random} random ${random === 1 ? 'country' : 'countries'}`;
+  if(!confirm(`Strike ${who} with ${kindName}?`)) return;
+  /* hostKey:R.key, not R.hostKey — R has no such field (see the top of the
+     script: `let R = { room:null, key:null, ... }`). Every other action on
+     this console reads R.key; this one is not special. */
+  const r = await api('POST','/api/host/act',
+    { room:R.room, hostKey:R.key, act:'strike', kind:STRIKE_KIND,
+      ...(pids.length ? { pids } : { random }) });
+  if(r.error) return alert(r.error);
+  /* Cleared here, in the set that actually decides what renders checked —
+     not by reaching into the DOM and unchecking boxes that the very next
+     tick() would have rebuilt unchecked anyway. Before this fix the DOM
+     write here raced the same poll that dropped a mid-read selection: it
+     "worked" only because nothing had rebuilt #strikeWho yet. */
+  STRIKE_SELECTED.clear();
+  $('strikeRandom').value = 0;
+  tick();
+}
+/* Whether the room code is worth the biggest type on a projected screen.
+   A hall's code is what every arriving country types, so it is always up. A
+   classroom's only does anything while open joining is on — /api/join refuses
+   it otherwise, and setting the group count turns open joining off — so the
+   rest of the time it was the largest thing on screen and unusable. The QR to
+   /play is useful in every room and every phase, so it never moves.
+   Returns the decision so the caller can word the leaderboard's empty state
+   the same way, rather than deciding it twice. */
+function renderJoinCard(d){
+  const codeWorks = d.kind === 'hall' || !!d.openJoin;
+  $('roomCodeBox').classList.toggle('hidden', !codeWorks);
+  $('joinHow').textContent = d.kind === 'hall'
+    ? 'Leader code first, then the room code on this screen.'
+    : codeWorks ? 'A new group can join with the room code. Groups you set up use their own codes.'
+    /* Before Set there are no codes to hand out, so telling a teacher to hand
+       them out is the one thing this line must not say. */
+    : !d.slots  ? 'Set the number of groups below — that deals each group its codes.'
+                : 'Each group types the leader or class code you handed out.';
+  return { codeWorks };
+}
+async function tick(){
+  const d = await api('GET','/api/room',{ room:R.room });
+  if(d.error) return;
+  R.data = d;
+  /* Only re-measure the clock offset when the server actually answered. A quiet
+     countdown bumps nothing, so /api/room 304s and the browser replays the last
+     body — `now` frozen inside it. Recomputing skew from that stale value grows
+     it by exactly the time that has passed, which cancels the countdown out and
+     leaves the clock stuck on the second it started. */
+  if(typeof d.now === 'number' && d.now !== R.lastNow){ R.lastNow = d.now; R.skew = Date.now() - d.now; }
+  drawClock();
+  /* A classroom has no deck to report on, and a hall must not show the tally
+     before the game is called — this console is projected, so a chart of what
+     everyone else picked would land in front of the groups still deciding.
+     The route refuses too; this only keeps the button off the wall. */
+  $('resultsBtn').classList.toggle('hidden', !(d.kind !== 'class' && d.phase === 'final'));
+  $('hostPills').innerHTML =
+    `<span class="pill">🌍 <b>${d.count}</b> countries</span>
+     <span class="pill">✅ <b>${d.ready}</b> ready</span>
+     <span class="pill">🔒 <b>${d.committed||0}</b> committed</span>
+     <span class="pill">⏱️ round <b>${d.round}/${d.maxRounds}</b></span>
+     <span class="pill">🎴 <b>${d.decided}/${d.count}</b> decided</span>`;
+  const { codeWorks } = renderJoinCard(d);
+  $('phaseHint').textContent =
+    d.phase==='prep' ? (d.kind==='class'
+      ? 'Nothing advances on its own. In a classroom, press Deal trade materials so groups have something to trade; rounds and scenario penalties belong to the hall.'
+      : `Nation-building stage — ${d.ready} of ${d.count} groups have finished. Start the mass game when most are ready.`)
+    : d.phase==='game' ? `Mass game, round ${d.round} of ${d.maxRounds}. Throw a card, let them decide and trade, then press Next round.`
+    : 'Final results are showing on every student screen.';
+  /* The open card used to be shown by highlighting its row in the list. A
+     thrown card is no longer in that list, so there is nothing left to
+     highlight — the hint line carries it instead, which also puts the title
+     where a game master reading aloud is already looking. */
+  if(d.kind !== 'class'){
+    /* While the window runs, the console says what the room is meant to be
+       doing — the game master is reading the story into it. */
+    const waiting = Math.ceil(((d.decideAt||0) - (Date.now() - R.skew)) / 1000);
+    $('scenHint').textContent = d.card
+      ? (waiting > 0
+          ? `Open now: ${d.card.icon} ${d.card.title} — discussion. Deciding and trading open in ${waiting}s.`
+          : `Open now: ${d.card.icon} ${d.card.title} — press Close card once every country has chosen.`)
+      : 'Every country sees the same card and must choose one option. A card you throw leaves this list.';
+  }
+  /* The card itself, over the whole console — see renderHostCard. Runs for a
+     classroom too: the drill is a rehearsal for exactly this moment, so it
+     should arrive on the wall looking the way the real thing will. */
+  renderHostCard(d);
+  renderStrikePicker(d);
+  renderHostStrike(d);
+  /* A resumed room does not know its kind until a reply lands, and the scenario
+     panel is completely different for a classroom and a hall. Redraw it the
+     first time the kind is known, and only then — rebuilding it every 2.2s
+     would blow away the drill button underneath the teacher's finger. */
+  if(R._scensKind !== d.kind){ R._scensKind = R.kind = d.kind; renderScens(); }
+
+  /* the drill button says what it is waiting for, rather than just failing */
+  const db = $('drillBtn');
+  if(db){
+    const used = (d.practiceLeft || 0) <= 0;
+    const ready = d.count > 0 && d.committed === d.count;
+    db.disabled = used || !ready || !!d.scenario;
+    /* the open card is checked FIRST: practiceLeft drops to 0 the moment the
+       card is dealt, so testing `used` first makes this branch unreachable and
+       the teacher is told the drill is over while it is still on screen */
+    $('drillNote').textContent =
+      d.scenario      ? 'The card is open — close it once every group has chosen.'
+    : used            ? 'The test scenario has been run.'
+    : !d.count        ? 'Waiting for groups to join.'
+    : !ready          ? `Waiting for every group to commit — ${d.committed} of ${d.count} so far.`
+    :                   'Everyone is committed. Ready when you are.';
+  }
+  $('board').innerHTML = d.board.length ? d.board.map((t,i)=>`
+    <div class="lb"><div class="rank ${i===0?'g1':''}">${i+1}</div>
+      <svg width="60" height="38" viewBox="0 0 210 132" style="border-radius:6px">
+        <rect width="210" height="132" fill="${safeColour(t.col1, '#0f5c8c')}"/>
+        <text x="56" y="66" font-size="48" text-anchor="middle" dominant-baseline="central">${esc(t.emblem)}</text></svg>
+      <div style="flex:1"><b>${esc(t.name)}</b> ${t.ready?'<span class="sub">✅</span>':''} ${t.chosen?'<span class="sub">🎴</span>':''}
+        <div class="sub">${METER_KEYS.map(k=>`${METER_INFO[k].icon}${Math.round(t.meters[k])}`).join(' ')} · 💰${t.coins} ${t.allies.length?'· 🤝'+t.allies.length:''}</div>
+        <div class="bar"><i style="width:${t.score.overall}%;background:linear-gradient(90deg,#37c7d4,#4ad991)"></i></div>
+      </div>
+      <div style="text-align:right"><div class="big">${t.score.overall}</div><div class="sub">bal ${t.score.balance}</div></div>
+    </div>`).join('') : `<div class="sub">${codeWorks
+      ? 'No countries yet — read out the room code.'
+      : 'No countries yet — hand each group its leader code, or turn open joining back on.'}</div>`;
+  $('feed').innerHTML = d.feed.map(f=>`<div>${esc(f.icon)} ${esc(f.text)}</div>`).join('') || '<div>Quiet so far.</div>';
+  /* Not gated on R.kind === 'class': a hall's own roster needs to keep up as
+     committed countries migrate in, so both kinds refresh every tick. */
+  refreshRoster();
+  /* Here rather than inside renderRoster: that function is pulled out and run
+     on its own by tests/console.test.js, so a call to anything outside it is a
+     ReferenceError there. The `folded` class sits on the CARD, not the list, so
+     rebuilding the rows never clears it — this only has to put the state back
+     after a reload or a resume, and once a second is cheap enough to be the
+     one place that happens. */
+  paintRosterFold();
+}
+
+/* Boot. Deliberately last, and deliberately not awaited by anything: the
+   start screen is already rendered behind it, so a laptop with no room
+   remembered — or one whose room has gone — simply stays there. */
+resumeStoredRoom();
+</script>
+</body></html>

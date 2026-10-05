@@ -1,0 +1,934 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Republic 2126 — How to start the game</title>
+<style>
+:root{--bg:#070d18;--panel:#101a2c;--panel2:#16243c;--line:#22334f;--ink:#eaf1fb;--dim:#93a7c4;
+ --gold:#f4c542;--grn:#4ad991;--red:#ff6b6b}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:radial-gradient(1200px 700px at 50% -10%,#16294a 0%,var(--bg)60%);color:var(--ink);
+ font:15px/1.55 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+
+/* ---------- chrome ---------- */
+.bar{position:fixed;top:0;left:0;right:0;height:52px;display:flex;align-items:center;gap:10px;
+ padding:0 14px;background:rgba(7,13,24,.82);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);z-index:20}
+.brand{font-weight:800;font-size:14px;letter-spacing:.3px;white-space:nowrap}
+.brand span{color:var(--gold)}
+.track{display:flex;gap:3px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:3px;flex-wrap:wrap}
+.track button{font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;border:0;background:transparent;
+ color:var(--dim);padding:6px 11px;border-radius:8px;white-space:nowrap}
+.track button[aria-pressed="true"]{background:var(--gold);color:#0b1220}
+.spacer{flex:1}
+.counter{font-size:13px;color:var(--dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+.bar .ghost{font:inherit;font-size:13px;cursor:pointer;border:1px solid var(--line);background:var(--panel2);
+ color:var(--ink);padding:7px 12px;border-radius:10px;text-decoration:none;white-space:nowrap}
+.bar .ghost:hover{border-color:var(--gold)}
+@media(max-width:560px){.track button{padding:6px 8px;font-size:11px}}
+
+/* ---------- slides ---------- */
+.deck{position:absolute;top:52px;left:0;right:0;bottom:60px}
+.slide{position:absolute;inset:0;display:none;padding:clamp(20px,4vh,48px) clamp(20px,5vw,72px);
+ overflow-y:auto;align-content:center;flex-direction:column;justify-content:center}
+.slide.on{display:flex;animation:in .32s ease}
+@keyframes in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.inner{width:100%;max-width:1180px;margin:0 auto}
+
+.eyebrow{color:var(--gold);font-weight:800;font-size:clamp(12px,1.5vw,15px);letter-spacing:2.4px;
+ text-transform:uppercase;margin-bottom:12px}
+h1{font-size:clamp(30px,5.4vw,62px);line-height:1.08;margin:0 0 16px;letter-spacing:-.5px}
+h2{font-size:clamp(24px,3.9vw,44px);line-height:1.14;margin:0 0 14px;letter-spacing:-.3px}
+.lead{font-size:clamp(16px,2.05vw,25px);color:var(--dim);line-height:1.5;max-width:60ch;margin:0 0 22px}
+.big{font-size:clamp(20px,2.6vw,32px);font-weight:700;line-height:1.35}
+.note{font-size:clamp(13px,1.35vw,17px);color:var(--dim);margin-top:20px}
+
+.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);
+ border-radius:16px;padding:clamp(14px,1.9vw,22px);box-shadow:0 12px 34px rgba(0,0,0,.42)}
+.grid{display:grid;gap:clamp(10px,1.3vw,16px)}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g5{grid-template-columns:repeat(5,1fr)}
+@media(max-width:900px){.g3,.g5,.g2{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.g3,.g5,.g2{grid-template-columns:1fr}}
+
+.ic{font-size:clamp(26px,3.2vw,42px);line-height:1;margin-bottom:8px;display:block}
+.card h3{margin:0 0 6px;font-size:clamp(15px,1.65vw,21px)}
+.card p{margin:0;color:var(--dim);font-size:clamp(12.5px,1.3vw,16px);line-height:1.45}
+
+/* numbered run-sheet steps */
+.steps{display:grid;gap:10px;counter-reset:s}
+.step{display:grid;grid-template-columns:auto 1fr;gap:clamp(12px,1.6vw,20px);align-items:start;
+ background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);
+ border-radius:14px;padding:clamp(11px,1.5vw,17px) clamp(13px,1.8vw,20px)}
+.num{width:clamp(32px,3.4vw,44px);height:clamp(32px,3.4vw,44px);border-radius:50%;background:var(--gold);
+ color:#0b1220;font-weight:900;font-size:clamp(15px,1.8vw,21px);display:grid;place-items:center}
+.step h3{margin:0 0 3px;font-size:clamp(15px,1.75vw,22px)}
+.step p{margin:0;color:var(--dim);font-size:clamp(12.5px,1.35vw,17px);line-height:1.45}
+kbd{background:var(--panel2);border:1px solid var(--line);border-bottom-width:2px;border-radius:7px;
+ padding:2px 8px;font:inherit;font-weight:700;font-size:.92em;color:var(--ink);white-space:nowrap}
+.press{color:var(--gold);font-weight:800}
+
+.warn{border-left:4px solid var(--gold);background:rgba(244,197,66,.09);border-radius:0 12px 12px 0;
+ padding:clamp(12px,1.6vw,18px) clamp(14px,1.9vw,22px);margin-top:18px}
+.warn b{color:var(--gold)}
+.warn p{margin:5px 0 0;color:var(--dim);font-size:clamp(13px,1.4vw,17px)}
+.warn + .warn{margin-top:10px}
+
+.url{display:inline-block;background:var(--panel);border:1px dashed var(--gold);border-radius:12px;
+ padding:clamp(10px,1.4vw,16px) clamp(14px,1.9vw,24px);font-weight:800;color:var(--gold);
+ font-size:clamp(17px,2.7vw,36px);word-break:break-all;letter-spacing:.4px}
+.codebox{display:inline-grid;place-items:center;background:var(--panel);border:1px solid var(--line);
+ border-radius:14px;padding:clamp(10px,1.4vw,18px) clamp(18px,2.6vw,34px);margin-top:6px}
+.codebox .lbl{font-size:clamp(11px,1.2vw,14px);color:var(--dim);letter-spacing:2px;text-transform:uppercase}
+.codebox .val{font-size:clamp(30px,5.5vw,68px);font-weight:900;letter-spacing:9px;color:var(--gold);line-height:1.15}
+
+/* pillar chart */
+.pillars{display:grid;grid-template-columns:repeat(6,1fr);gap:clamp(8px,1.2vw,16px);align-items:end;
+ height:clamp(120px,20vh,210px);margin:8px 0 4px}
+.pil{display:flex;flex-direction:column;justify-content:flex-end;height:100%;text-align:center;gap:7px}
+.bar-f{background:linear-gradient(180deg,var(--grn),#2f9d6a);border-radius:8px 8px 0 0;min-height:5px}
+.pil.low .bar-f{background:linear-gradient(180deg,var(--red),#b83f3f)}
+.pil small{font-size:clamp(10.5px,1.15vw,14px);color:var(--dim);font-weight:700}
+.pil.low small{color:var(--red)}
+
+.tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.tag{background:var(--panel2);border:1px solid var(--line);border-radius:999px;
+ padding:6px 13px;font-size:clamp(12px,1.3vw,16px);font-weight:600}
+.tag.g{border-color:var(--grn);color:var(--grn)}
+.tag.r{border-color:var(--red);color:var(--red)}
+ul.clean{margin:0;padding-left:1.15em;color:var(--dim);font-size:clamp(13.5px,1.5vw,19px);line-height:1.62}
+ul.clean li{margin-bottom:7px}
+ul.clean b{color:var(--ink)}
+
+/* ---------- footer nav ---------- */
+.nav{position:fixed;bottom:0;left:0;right:0;height:60px;display:flex;align-items:center;gap:14px;
+ padding:0 16px;background:rgba(7,13,24,.82);backdrop-filter:blur(8px);border-top:1px solid var(--line);z-index:20}
+.nav button{font:inherit;font-weight:700;cursor:pointer;border-radius:12px;border:1px solid var(--line);
+ background:var(--panel2);color:var(--ink);padding:10px 20px}
+.nav button:hover:not(:disabled){border-color:var(--gold)}
+.nav button:disabled{opacity:.32;cursor:default}
+.dots{flex:1;display:flex;gap:6px;justify-content:center;flex-wrap:wrap}
+/* specificity must beat `.nav button` above, or the dots inherit its padding and stretch into pills */
+.nav .dot{width:9px;height:9px;flex:0 0 9px;border-radius:50%;background:var(--line);
+ border:0;padding:0;margin:0;cursor:pointer}
+.nav .dot.on{background:var(--gold);transform:scale(1.32)}
+.nav .dot:hover{background:var(--dim)}
+.hint{position:fixed;bottom:68px;right:16px;font-size:12px;color:var(--dim);opacity:.65;z-index:19}
+@media(max-width:700px){.hint{display:none}.brand{display:none}}
+
+/* Print scope: only the slides belonging to whichever track is currently open.
+   #deck carries the live track as a data attribute (see setTrack()), so the
+   selector below only ever matches one track's slides — the other three
+   tracks' slides stay display:none, exactly as they are on screen. */
+@media print{
+ body{overflow:visible;background:#fff;color:#000}
+ .bar,.nav,.hint{display:none}
+ .deck{position:static}
+ .slide{display:none}
+ #deck[data-track="s"] .slide[data-track="s"],
+ #deck[data-track="t"] .slide[data-track="t"],
+ #deck[data-track="g"] .slide[data-track="g"],
+ #deck[data-track="a"] .slide[data-track="a"]
+   {position:static;display:flex!important;page-break-after:always;min-height:96vh;border-bottom:1px solid #ccc}
+}
+.qrow{display:flex;gap:clamp(14px,2vw,28px);align-items:center;flex-wrap:wrap}
+/* No display: here, ever. QR.render() (public/qr.js) hides a failed render by
+   setting el.hidden = true without clearing innerHTML — that relies entirely
+   on the UA's `[hidden]{display:none}` rule. An author display: on .qr (e.g.
+   display:flex to centre the SVG) would defeat it and paint an empty white
+   box on this dark slide instead of hiding cleanly. Centre via a wrapper. */
+.qr{background:#fff;border-radius:12px;padding:10px;line-height:0;flex:0 0 auto}
+/* Size is owned by CSS, not by QR.svg()'s width/height attributes — those are
+   only the intrinsic fallback for a caller with no stylesheet (opts.size,
+   public/qr.js). Change the rendered size here, not at the call site. */
+.qr svg{display:block;width:clamp(120px,16vw,300px);height:auto}
+.qr.big svg{width:clamp(180px,46vw,480px)}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">🏙️ Republic <span>2126</span></div>
+  <div class="track" role="group" aria-label="Choose deck">
+    <button class="trackBtn" data-t="s" aria-pressed="false" onclick="setTrack('s')"
+      title="Students — join, roles, build, commit, the mass game">🎮 Class</button>
+    <button class="trackBtn" data-t="t" aria-pressed="true" onclick="setTrack('t')"
+      title="Form teacher — run Session 1 in your own classroom">🎛️ Teacher</button>
+    <button class="trackBtn" data-t="g" aria-pressed="false" onclick="setTrack('g')"
+      title="Game master — run Session 2, the mass game, in the hall">🏟️ Hall</button>
+    <button class="trackBtn" data-t="a" aria-pressed="false" onclick="setTrack('a')"
+      title="Admin — deploy it, set ADMIN_KEY, back up and wipe rooms">🗝️ Admin</button>
+  </div>
+  <div class="spacer"></div>
+  <div class="counter" id="counter">1 / 1</div>
+  <a class="ghost" href="/host" target="_blank" rel="noopener">Console ↗</a>
+</header>
+
+<main class="deck" id="deck">
+
+<!-- ============ TEACHER TRACK — form teacher, Session 1 ============ -->
+<section class="slide" data-track="t">
+  <div class="inner">
+    <div class="eyebrow">Form teacher run-sheet · Session 1</div>
+    <h1>Running Session&nbsp;1 — your classroom</h1>
+    <p class="lead">Your class builds their countries and commits them. Session 2 — the mass game in the
+      hall — happens separately, run by the game master, on this day or a different one.</p>
+    <div class="grid g3">
+      <div class="card"><span class="ic">⏱️</span><h3>~20 min</h3><p>Groups build their country through eight steps — including housing their people, which some cannot do without trading.</p></div>
+      <div class="card"><span class="ic">🪪</span><h3>Vet &amp; commit</h3><p>Fix or bounce a bad name, then wait for every group to show 🔒 committed.</p></div>
+      <div class="card"><span class="ic">🤝</span><h3>Hand off</h3><p>Once every group is committed, tell them the three steps for hall day and you are done.</p></div>
+    </div>
+    <p class="note">Press <kbd>→</kbd> or <kbd>Space</kbd> to advance · <kbd>F</kbd> for fullscreen</p>
+  </div>
+</section>
+
+<section class="slide" data-track="t">
+  <div class="inner">
+    <div class="eyebrow">Before the class walks in</div>
+    <h2>Open a classroom room and project it</h2>
+    <p class="lead">Everything you press lives on one screen. Put it on the projector — the room code
+      needs to be readable from the back.</p>
+    <div class="url" id="hostUrl">/host</div>
+    <div class="warn">
+      <b>⚠️ Write down two things, every time a room opens.</b>
+      <p>The <b>room code</b> (4 letters) and the <b>host key</b> (top-right of the console).
+        Together they are the only way back into this room on another day. No key, no way back.</p>
+    </div>
+    <p class="note">A classroom room cannot start the mass game — that button only works in a hall
+      room, opened separately by the game master.</p>
+  </div>
+</section>
+
+<section class="slide" data-track="t">
+  <div class="inner">
+    <div class="eyebrow">Session 1 — your classroom, your room</div>
+    <h2>Build the countries</h2>
+    <div class="steps">
+      <div class="step"><div class="num">1</div><div>
+        <h3>Open a <span class="press">🏫 Classroom room →</span></h3>
+        <p>A box opens: type your class, e.g. "3E", then press
+          <span class="press">New practice session →</span>. This room is yours alone.</p></div></div>
+      <div class="step"><div class="num">2</div><div>
+        <h3>Set the number of groups</h3>
+        <p>Type how many groups you have and press <span class="press">Set</span>. Codes and homelands
+          are dealt for you.</p></div></div>
+      <div class="step"><div class="num">3</div><div>
+        <h3>Hand each group its two codes</h3>
+        <p>Every group gets a <b>leader code</b> and a <b>class code</b>. Leader code goes to one iPad
+          only — that is the device that drives. If you print the roster, it shows the class label and
+          room code, never the host key — safe to hand out.</p></div></div>
+    </div>
+    <p class="note">Building takes about 20 minutes per class.</p>
+  </div>
+</section>
+
+<section class="slide" data-track="t">
+  <div class="inner">
+    <div class="eyebrow">Session 1 — once they are building</div>
+    <h2>Vet, commit, then test</h2>
+    <div class="steps">
+      <div class="step"><div class="num">4</div><div>
+        <h3>Vet the names</h3>
+        <p><span class="press">✏️</span> to fix a name yourself. <span class="press">↩️</span> to send it
+          back — that clears the name and reopens the group for editing. Retype exactly what you just
+          rejected and the app refuses it: "that one was just turned down. Type a genuinely new name."
+          <span class="press">🗑️</span> removes a group for good — an empty one, or a real one whose
+          country you no longer want in the class. It asks first, and names what it is about to delete.</p></div></div>
+      <div class="step"><div class="num">5</div><div>
+        <h3>Wait for every group to show 🔒</h3>
+        <p>🔒 means committed: name, flag, ministers, points, policy cards, buildings and industries are
+          locked. The room stays open — you can still reopen a country any time.</p></div></div>
+      <div class="step"><div class="num">6</div><div>
+        <h3>Run the test scenario, then <span class="press">Ready for the hall ✓</span></h3>
+        <p>One card, and it comes last: <span class="press">Run the test scenario</span> stays greyed out
+          until every group has committed. It shows them exactly what a hall card feels like and costs
+          them nothing — their meters go back when you press <span class="press">Close card</span>. It is
+          not one of the hall's cards, so it gives nothing away.</p></div></div>
+    </div>
+    <p class="note">The test scenario is the last thing you do — it cannot run until every group is committed.</p>
+  </div>
+</section>
+
+<section class="slide" data-track="t">
+  <div class="inner">
+    <div class="eyebrow">During Session 1</div>
+    <h2>Why nation-building gets loud</h2>
+    <p class="lead">A country houses only about <b>half its workforce</b> to begin with, and an unhoused
+      worker cannot be employed. Homes cost materials and food — so the Build step is where groups
+      discover they cannot do this alone.</p>
+    <div class="grid g3">
+      <div class="card"><span class="ic">🏘️</span><h3>Build before Industry</h3>
+        <p>The step order is the lesson. A group that skips housing arrives at Industry unable to staff
+          what it planned, and the app tells it exactly how many people have nowhere to live.</p></div>
+      <div class="card"><span class="ic">🤝</span><h3>They can trade right away</h3>
+        <p>There is a trade panel on the Build step — they do not have to wait for the mass game.
+          Expect groups to leave their seats and go looking for materials.</p></div>
+      <div class="card"><span class="ic">⚖️</span><h3>Three homelands cannot finish alone</h3>
+        <p>River Delta is one material short, Port City is short of both, Dry Plains is short of food.
+          That is deliberate — it is what gives trade something to be about.</p></div>
+    </div>
+    <div class="warn"><b>If a group says they are stuck, they probably are — and that is correct.</b>
+      <p>The app says so on screen: <i>"Your homeland does not have enough to house everyone — that is
+        not a mistake."</i> Point them at another group rather than at a fix. A country that launches
+        with people unhoused is not broken; it will build its way out once industries start paying.</p></div>
+  </div>
+</section>
+
+<section class="slide" data-track="t">
+  <div class="inner">
+    <div class="eyebrow">Building one day, playing the next</div>
+    <h2>Two rooms, two sessions</h2>
+    <p class="lead">A classroom room is kept for 14 days. You build in it; the mass game happens later
+      in a hall room, opened and run separately by the game master.</p>
+    <div class="grid g3">
+      <div class="card"><span class="ic">💾</span><h3>Save backup</h3>
+        <p>At the end of the lesson, download the whole room as a file from the console. Belt and braces.</p></div>
+      <div class="card"><span class="ic">🔑</span><h3>Resume</h3>
+        <p>Next lesson: open the console and press <span class="press">🏫 Classroom room →</span> again —
+          this room's <b>room code</b> and <b>host key</b> go in the two fields at the top of that box, then
+          <span class="press">Resume</span>.</p></div>
+      <div class="card"><span class="ic">🪪</span><h3>They keep both codes</h3>
+        <p>A group's leader code brings their country straight back — new device, flat battery, closed
+          tab. Their class code keeps working too.</p></div>
+    </div>
+    <div class="warn"><b>⚠️ A latecomer, or a group that lost both codes?</b>
+      <p>Your room starts closed: students only get in with the leader and class codes you hand out, and
+        the room code on screen will not let anyone in. Press <b>Allow open joining</b> on the roster
+        card to open that door — then someone can mint a fresh country by typing the room code. Press it
+        again to shut it. This lever only exists on a classroom console — a hall console does not have
+        it.</p></div>
+  </div>
+</section>
+
+<section class="slide" data-track="t">
+  <div class="inner">
+    <div class="eyebrow">Handing over</div>
+    <h2>Tell your class what happens next</h2>
+    <p class="lead">Session 2 happens in a hall room, opened separately by the game master — usually on
+      event day, in front of the whole cohort.</p>
+    <div class="steps">
+      <div class="step"><div class="num">1</div><div>
+        <h3>Open <span class="press">/play</span></h3>
+        <p>Same address they used to join Session 1.</p></div></div>
+      <div class="step"><div class="num">2</div><div>
+        <h3>Type your leader code</h3>
+        <p>The same 5-letter code from Session 1. This is what brings your committed country along.</p></div></div>
+      <div class="step"><div class="num">3</div><div>
+        <h3>Type the hall room code the game master projects</h3>
+        <p>That's 4 letters, not your 5-letter leader code.</p></div></div>
+    </div>
+    <p class="note">Their committed country arrives exactly as they left it — flag, ministers, points,
+      policy cards, buildings, industries. This classroom room stays open — you can still reopen a
+      country any time, even after hall day.</p>
+  </div>
+</section>
+
+<section class="slide" data-track="t">
+  <div class="inner">
+    <div class="eyebrow">Afterwards</div>
+    <h2>The debrief is the lesson</h2>
+    <p class="lead">Once the game master has run Session 2 and shown the final table, the scoreboard is
+      the hook back in your own classroom. These three questions are what they take home.</p>
+    <div class="grid g3">
+      <div class="card"><span class="ic">💸</span><h3>Cheap then, expensive later?</h3>
+        <p>Which decision felt like a bargain at the time and cost you dearly by round five?</p></div>
+      <div class="card"><span class="ic">🤝</span><h3>Who did you trade with?</h3>
+        <p>And why them? What did you have that they needed — and what did that cost you?</p></div>
+      <div class="card"><span class="ic">🔁</span><h3>What would you change?</h3>
+        <p>If you started again tomorrow with the same homeland, what would you do differently?</p></div>
+    </div>
+    <div class="warn"><b>Harmony is not decoration.</b>
+      <p>It multiplies the income every industry earns. A divided country literally collects less money
+        from the same factories — worth pointing at on the final table.</p></div>
+  </div>
+</section>
+
+<!-- ============ HALL TRACK — game master, Session 2 ============ -->
+<section class="slide" data-track="g">
+  <div class="inner">
+    <div class="eyebrow">Game master run-sheet · Session 2</div>
+    <h1>Running Session&nbsp;2 — the hall</h1>
+    <p class="lead">Every class's committed countries land in one hall room and play together.
+      About 25 minutes, five rounds — or fewer, if you call it early.</p>
+    <div class="grid g3">
+      <div class="card"><span class="ic">🏟️</span><h3>One hall room</h3><p>Every class sends its countries here — never open a second one.</p></div>
+      <div class="card"><span class="ic">🎴</span><h3>Five rounds</h3><p>Throw a card, run the clock, let them trade, press Next round.</p></div>
+      <div class="card"><span class="ic">🏆</span><h3>Final results</h3><p>Reveal the leaderboard and every country's title whenever you are ready to stop.</p></div>
+    </div>
+    <p class="note">Press <kbd>→</kbd> or <kbd>Space</kbd> to advance · <kbd>F</kbd> for fullscreen</p>
+  </div>
+</section>
+
+<section class="slide" data-track="g">
+  <div class="inner">
+    <div class="eyebrow">Before the hall fills up</div>
+    <h2>Open a hall room and project the code</h2>
+    <p class="lead">This is the one room every class lands in. The room code needs to be readable from
+      the back of the hall.</p>
+    <div class="url" id="hostUrl2">/host</div>
+    <div class="warn">
+      <b>⚠️ Write down two things, every time a room opens.</b>
+      <p>The <b>room code</b> (4 letters) and the <b>host key</b> (top-right of the console). Together
+        they are the only way back into this room. No key, no way back.</p>
+    </div>
+    <div class="warn">
+      <b>🏟️ One hall room for the whole cohort.</b>
+      <p>Each class has its own classroom room, but every class should send its countries into the
+        <b>same</b> hall room — one leaderboard ranking the whole cohort is what makes the final reveal
+        land. Do not open a second hall room.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-track="g">
+  <div class="inner">
+    <div class="eyebrow">Bringing it together</div>
+    <h2>Groups arrive, then you play</h2>
+    <div class="steps">
+      <div class="step"><div class="num">1</div><div>
+        <h3>Groups type their leader code, then the hall room code</h3>
+        <p>Their committed country arrives exactly as they left it — flag, ministers, points, policy
+          cards, buildings, industries.</p></div></div>
+      <div class="step"><div class="num">2</div><div>
+        <h3>Play as normal</h3>
+        <p>Throw a card, let the cabinets argue, give them time to trade, press
+          <span class="press">Next round ▶</span>.</p></div></div>
+    </div>
+    <p class="note">Five rounds, roughly 25 minutes, then <span class="press">3 · Final results</span>
+      whenever you decide to stop.</p>
+  </div>
+</section>
+
+<section class="slide" data-track="g">
+  <div class="inner">
+    <div class="eyebrow">During the hall, each round</div>
+    <h2>The rhythm of a round</h2>
+    <p class="lead">The same four beats, up to five times over. Your job is the pacing — the game does the rest.</p>
+    <div class="grid g2">
+      <div class="card"><span class="ic">🎴</span><h3>Throw the card</h3>
+        <p>One scenario hits every country in the room at once. Read it aloud; the console shows it on their screens too.</p></div>
+      <div class="card"><span class="ic">🗣️</span><h3>The first minute is yours</h3>
+        <p>For sixty seconds after a card lands, nobody can decide, trade or make an alliance — the
+          server refuses all three and every phone counts it down. Read the story into that minute.
+          It is the only part of the round where the room has nothing else to do.</p></div>
+      <div class="card"><span class="ic">⏱️</span><h3>Let them argue — on the clock</h3>
+        <p>Five ministers, one decision. Set <b>Decision time</b> to 1, 2 or 3 minutes and every card
+          starts the clock by itself; students see the same countdown on their own screens. Do not
+          rescue them — the disagreement is where the thinking happens.</p></div>
+      <div class="card"><span class="ic">🤝</span><h3>Open the floor to trade</h3>
+        <p>No country can build everything alone. Groups can already trade from the Build step, but this
+          is when alliances start to matter — they make co-operative scenario choices far stronger.
+          Defence Ministers propose alliances and Trade Ministers send goods. Each picks the other
+          country by name on the Trade / Alliance tab, and the other side has to accept.</p></div>
+      <div class="card"><span class="ic">▶️</span><h3>Press Next round</h3>
+        <p>The clock running out does <b>not</b> advance anything — it turns red and tells you how many
+          countries are still deciding. You press the button when you are ready. Then income is
+          collected, meters move and the leaderboard reshuffles.</p></div>
+    </div>
+    <div class="warn"><b>Resist the urge to warn them.</b>
+      <p>Cheap policy cards are cheap for a reason, and nothing is labelled "bad". Groups only discover
+        the cost when the meters move — and that discovery is the whole point. A country that never
+        decides at all loses <b>Stability and Harmony</b>: refusing to govern is its own choice.</p></div>
+  </div>
+</section>
+
+<section class="slide" data-track="g">
+  <div class="inner">
+    <div class="eyebrow">When something goes wrong</div>
+    <h2>Rescues — with three hundred people watching</h2>
+    <p class="lead">Two levers on this console get you out of trouble fast, without stopping the room.</p>
+    <div class="grid g2">
+      <div class="card"><span class="ic">🪪</span><h3>Pull them in by leader code</h3>
+        <p>A device died before its country migrated? Type the leader code into <b>Bring them in</b> on
+          this console and it joins the hall directly.</p></div>
+      <div class="card"><span class="ic">✏️</span><h3>Rename or reopen, live</h3>
+        <p>The same ✏️ rename, ↩️ ask-to-rename and 🔓 reopen tools from Session 1 are still here.
+          Reopening a country in the hall needs it to commit again before it counts.</p></div>
+    </div>
+    <p class="note">Printing the roster mid-event shows the class label and room code — never the host
+      key. Safe to hand to a runner.</p>
+  </div>
+</section>
+
+<section class="slide" data-track="g">
+  <div class="inner">
+    <div class="eyebrow">Ending the hall</div>
+    <h2>Call it whenever you're ready</h2>
+    <p class="lead">Five rounds is the default pace, not a limit. Press <b>3 · Final results</b> at any
+      round to reveal the leaderboard and every country's title.</p>
+    <div class="grid g3">
+      <div class="card"><span class="ic">🏆</span><h3>3 · Final results</h3><p>Every student screen switches to the final table and title reveal at once.</p></div>
+      <div class="card"><span class="ic">💾</span><h3>Save a backup</h3><p>Same as Session 1 — download the room as a file from the console. Belt and braces.</p></div>
+      <div class="card"><span class="ic">🔓</span><h3>Room stays open</h3><p>You can still reopen a country and revisit it afterwards.</p></div>
+    </div>
+    <p class="note">The debrief happens back in the classroom, run by each group's own form teacher.</p>
+  </div>
+</section>
+
+<section class="slide" data-track="g">
+  <div class="inner">
+    <div class="eyebrow">Ending the hall</div>
+    <h2>Show them what the region decided</h2>
+    <p class="lead">Once you have pressed <b>3 · Final results</b>, a <b>📊 How the hall voted</b>
+      button appears beside it. It puts one card at a time on the screen, with the number of
+      countries behind each option.</p>
+    <div class="grid g3">
+      <div class="card"><span class="ic">📊</span><h3>One card a screen</h3><p>Every card you threw, in the order you threw them. <kbd>←</kbd> <kbd>→</kbd> to step, <kbd>Esc</kbd> to close.</p></div>
+      <div class="card"><span class="ic">⏱️</span><h3>The ones who didn't</h3><p>A fourth, hollow bar counts the countries that ran out of time. That was a decision too.</p></div>
+      <div class="card"><span class="ic">🙈</span><h3>Not before you call it</h3><p>The button does not exist until the game is over — this console is projected, and a live tally tells a group what everyone else picked.</p></div>
+    </div>
+    <p class="note">No option on any card is the best one. The useful question is not which bar is
+      tallest, but what the biggest group was weighing — and what a smaller one saw that the room missed.</p>
+  </div>
+</section>
+
+<!-- ============ ADMIN TRACK — deploy, keys, backups, wiping ============ -->
+<section class="slide" data-track="a">
+  <div class="inner">
+    <div class="eyebrow">Admin run-sheet</div>
+    <h1>Setting this up</h1>
+    <p class="lead">One person, usually before the event: deploy it, set the admin key, keep backups,
+      and clear out old rooms.</p>
+    <div class="grid g3">
+      <div class="card"><span class="ic">🚂</span><h3>Railway</h3><p>One long-lived process, a volume mounted at <code>/data</code>, one replica.</p></div>
+      <div class="card"><span class="ic">🗝️</span><h3>ADMIN_KEY</h3><p>16 or more characters, set in Railway's variables.</p></div>
+      <div class="card"><span class="ic">🧹</span><h3>/admin panel</h3><p>List rooms, back one up, delete a few, or wipe everything.</p></div>
+    </div>
+    <p class="note">Press <kbd>→</kbd> or <kbd>Space</kbd> to advance · <kbd>F</kbd> for fullscreen</p>
+  </div>
+</section>
+
+<section class="slide" data-track="a">
+  <div class="inner">
+    <div class="eyebrow">Setting one up from scratch</div>
+    <h2>Deploy to Railway</h2>
+    <div class="steps">
+      <div class="step"><div class="num">1</div><div>
+        <h3>Push this folder to a new GitHub repository</h3>
+        <p>Railway builds straight from it.</p></div></div>
+      <div class="step"><div class="num">2</div><div>
+        <h3>Railway: New Project → Deploy from GitHub repo</h3>
+        <p>If the repo does not appear, the Railway GitHub App has not been given access — authorise it
+          from the repo picker.</p></div></div>
+      <div class="step"><div class="num">3</div><div>
+        <h3>Nothing to configure</h3>
+        <p>Railway detects Node via NIXPACKS and runs <b>npm start</b>. No environment variables are
+          required — the server reads <b>process.env.PORT</b> on its own.</p></div></div>
+      <div class="step"><div class="num">4</div><div>
+        <h3>Settings → Networking → Generate Domain</h3>
+        <p>That URL is what the class uses for <b>/play</b> and you use for <b>/host</b>.</p></div></div>
+      <div class="step"><div class="num">5</div><div>
+        <h3>Settings → Volumes → add a volume mounted at <code>/data</code></h3>
+        <p>The server finds it on its own. Without it, rooms survive a restart but not a redeploy.</p></div></div>
+    </div>
+    <p class="note"><b>GET /health</b> returns <b>ok</b> — point Railway's health check at that path.</p>
+  </div>
+</section>
+
+<section class="slide" data-track="a">
+  <div class="inner">
+    <div class="eyebrow">The master switch</div>
+    <h2>ADMIN_KEY and the /admin panel</h2>
+    <p class="lead">Set <b>ADMIN_KEY</b> in Railway's variables — 16 characters or more. Unset, or
+      shorter than that, and <b>/admin</b> loads but every action on it refuses.</p>
+    <div class="url" id="adminUrl">/admin</div>
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card"><span class="ic">📋</span><h3>List rooms</h3>
+        <p>Code, kind, label, how many countries and how many committed, phase and round, and when it
+          was last touched. No host keys and no country codes — this is for triage, not for reading
+          over somebody's shoulder.</p></div>
+      <div class="card"><span class="ic">💾</span><h3>Download everything</h3>
+        <p>Every room on the server, exported as one JSON file — the same shape <b>/host</b> can
+          restore a single room from.</p></div>
+      <div class="card"><span class="ic">🗑</span><h3>Delete selected</h3>
+        <p>Tick rooms, confirm, gone — flushed to disk immediately, not on the usual delay.</p></div>
+      <div class="card"><span class="ic">☢️</span><h3>Delete everything</h3>
+        <p>Type <b>DELETE</b> to arm the button. Deletes every room on the server, including any game
+          in progress.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-track="a">
+  <div class="inner">
+    <div class="eyebrow">Belt and braces</div>
+    <h2>Backups &amp; restore</h2>
+    <p class="lead">Every change is written to <b>rooms.json</b> about a second later, and read back
+      when the server starts — a room survives a restart on its own.</p>
+    <div class="grid g3">
+      <div class="card"><span class="ic">💾</span><h3>From the console</h3><p><b>💾 Save backup</b> on <b>/host</b> downloads the one room a teacher or game master is running.</p></div>
+      <div class="card"><span class="ic">🗝️</span><h3>From /admin</h3><p><b>Download everything</b> backs up every room on the server in one file.</p></div>
+      <div class="card"><span class="ic">📂</span><h3>Restore</h3><p><b>📂 Restore from file</b> on <b>/host</b>'s setup screen puts a room back with the same room code and the same country codes. While the room is still open this needs nothing extra; a room that has actually closed (volume lost, an /admin wipe, or a teacher's own Reset) needs the <b>admin key</b> too.</p></div>
+    </div>
+    <div class="warn"><b>⚠️ The volume is what makes any of this survive a redeploy.</b>
+      <p>Mount it at <code>/data</code>. Without it, a restart still keeps rooms — a redeploy does not.</p></div>
+  </div>
+</section>
+
+<section class="slide" data-track="a">
+  <div class="inner">
+    <div class="eyebrow">The one rule that matters most</div>
+    <h2>One replica, always</h2>
+    <p class="lead">Rooms live in this process's memory. If Railway runs two copies of the server, half
+      the class lands on a copy that has never heard of the room code.</p>
+    <div class="warn"><b>Settings → Deploy → Replicas: 1.</b>
+      <p>Do not switch on horizontal autoscaling. One replica carries a whole cohort comfortably.</p></div>
+    <div class="grid g3" style="margin-top:16px">
+      <div class="card"><span class="ic">📶</span><h3>One student poll</h3><p>1.2 KB gzipped — or a 304 with no body at all when nothing has changed.</p></div>
+      <div class="card"><span class="ic">🏟️</span><h3>250 devices at once</h3><p>Served in 253 ms, 306 KB total, measured with 50 groups in one room.</p></div>
+      <div class="card"><span class="ic">🧠</span><h3>50 groups in memory</h3><p>62 MB. There is plenty of headroom on one replica.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-track="a">
+  <div class="inner">
+    <div class="eyebrow">Tuning it</div>
+    <h2>Environment variables</h2>
+    <div class="grid g3">
+      <div class="card"><span class="ic">📁</span><h3>DATA_DIR</h3><p><code>/data</code> if it exists, else <code>./data</code>. Where <b>rooms.json</b> is written.</p></div>
+      <div class="card"><span class="ic">🗓️</span><h3>ROOM_TTL_DAYS</h3><p>Default <b>14</b>. How long an untouched room is kept before it is swept.</p></div>
+      <div class="card"><span class="ic">🗝️</span><h3>ADMIN_KEY</h3><p>Unset by default. 16 or more characters turns <b>/admin</b> on.</p></div>
+    </div>
+    <p class="note">Wipe old rooms from <b>/admin</b> before a new cohort's event, or just let the
+      14-day sweep handle it on its own.</p>
+  </div>
+</section>
+
+<!-- ============ CLASS TRACK — students ============ -->
+<section class="slide" data-track="s">
+  <div class="inner">
+    <div class="eyebrow">Secondary 3–4 · groups of five</div>
+    <h1>You are about to run a&nbsp;country.</h1>
+    <p class="lead">Five of you. One nation. Five rounds of things going wrong.</p>
+    <div class="big" style="color:var(--gold)">The winner is not the richest country.<br>It is the most well-rounded one.</div>
+  </div>
+</section>
+
+<section class="slide" data-track="s">
+  <div class="inner">
+    <div class="eyebrow">Step one</div>
+    <h2>Get into the room</h2>
+    <p class="lead">One device per group. Open this address:</p>
+    <div class="qrow">
+      <div class="url" id="playUrl">/play</div>
+      <div class="qr" id="playQr" hidden></div>
+    </div>
+    <p class="lead" style="margin-top:20px">Your teacher gives your group <b>two codes</b>. Type
+      whichever one is yours.</p>
+    <div class="grid g2">
+      <div class="card" style="border-color:var(--gold)"><span class="ic">👑</span><h3>Leader code</h3>
+        <p>One iPad. This is the device that drives — it can change the country.</p></div>
+      <div class="card"><span class="ic">👀</span><h3>Class code</h3>
+        <p>Everyone else. You watch the country grow, but only the leader can change it.</p></div>
+    </div>
+    <div class="warn"><b>Decide who is driving before you type anything.</b>
+      <p>Write both codes down. If a battery dies or a tab closes, the leader code brings your country
+        straight back on any device.</p></div>
+  </div>
+</section>
+
+<section class="slide" data-track="s">
+  <div class="inner">
+    <div class="eyebrow">Step two</div>
+    <h2>Give everyone a job</h2>
+    <p class="lead">Five people, five roles. Every one of them decides something that matters.</p>
+    <div class="grid g5">
+      <div class="card"><span class="ic">👑</span><h3>Leader</h3><p>Names the country, designs the flag, splits the nation-building points. Breaks ties.</p></div>
+      <div class="card"><span class="ic">📚</span><h3>Education</h3><p>Builds Knowledge — which unlocks the best industries.</p></div>
+      <div class="card"><span class="ic">🛡️</span><h3>Defence</h3><p>Builds Defence and Stability. But weapons cost money.</p></div>
+      <div class="card"><span class="ic">⚖️</span><h3>Trade &amp; Industry</h3><p>Runs the industries that earn coins. Leads all your trading.</p></div>
+      <div class="card"><span class="ic">🏗️</span><h3>Infrastructure</h3><p>Homes, transport and power — and keeping communities at peace.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-track="s">
+  <div class="inner">
+    <div class="eyebrow">Step three</div>
+    <h2>Eight steps to launch</h2>
+    <p class="lead">The app walks you through these in order. Take about twenty minutes.</p>
+    <div class="grid g3" style="margin-bottom:14px">
+      <div class="card"><span class="ic">🗺️</span><h3>1 · Homeland</h3><p>Delta, highlands, port, isles, forest or dry plains. Each starts you with different resources.</p></div>
+      <div class="card"><span class="ic">🪪</span><h3>2 · Roles</h3><p>Put a name to each of the five jobs.</p></div>
+      <div class="card"><span class="ic">👑</span><h3>3 · Identity</h3><p>Country name, motto, colours, emblem.</p></div>
+    </div>
+    <div class="grid g3" style="margin-bottom:14px">
+      <div class="card"><span class="ic">💠</span><h3>4 · Points</h3><p>Split <b>24 points</b> between the four ministries — no ministry below 3 or above 12.</p></div>
+      <div class="card"><span class="ic">🗂️</span><h3>5 · Policies</h3><p>Each minister picks the policy cards their ministry can afford.</p></div>
+      <div class="card" style="border-color:var(--gold)"><span class="ic">🏘️</span><h3>6 · Build</h3><p>House your people. Only half of them start with somewhere to live — and <b>workers with no home cannot work</b>.</p></div>
+    </div>
+    <div class="grid g2">
+      <div class="card"><span class="ic">🏗️</span><h3>7 · Industry</h3><p>Spend workers, materials and food on industries that earn coins. You can only employ workers you have housed.</p></div>
+      <div class="card"><span class="ic">🚀</span><h3>8 · Launch</h3><p>Press <b>We are ready ✓</b> and wait for the mass game.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-track="s">
+  <div class="inner">
+    <div class="eyebrow">When you are happy</div>
+    <h2>Commit</h2>
+    <p class="lead">Pressing <b>We are ready ✓</b> commits your country. That locks your name, flag,
+      ministers, points, policy cards, buildings and industries.</p>
+    <div class="warn"><b>🔓 Your teacher can reopen it if something is wrong.</b>
+      <p>Reopening means it needs to commit again before it counts in the hall.</p></div>
+    <div style="margin-top:20px" id="roomSlot">
+      <p class="lead" style="margin:0">In the hall, type your <b style="color:var(--ink)">leader
+        code</b>, then the <b style="color:var(--ink)">hall room code</b> on your teacher's screen.</p>
+      <p class="lead" style="margin:6px 0 0">That's 4 letters — not your 5-letter code. Your country
+        travels with you.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-track="s">
+  <div class="inner">
+    <div class="eyebrow">Step six, in detail</div>
+    <h2>House your people before you hire them</h2>
+    <p class="lead">Your country starts with only about <b>half its workers</b> housed. The rest have
+      nowhere to live — and a worker with nowhere to live <b style="color:var(--red)">cannot work</b>.</p>
+    <div class="grid g3">
+      <div class="card"><span class="ic">🏠</span><h3>Homes cost materials and food</h3>
+        <p>Not points. <b>−2 ⛏️ −2 🌾</b> buys a home that houses two more workers. Homes are always
+          available, whatever your ministers chose.</p></div>
+      <div class="card"><span class="ic">🗂️</span><h3>Your policies unlock the rest</h3>
+        <p>Housing estates, MRT stations, solar farms, coal plants, parks and places of worship each
+          need the Infrastructure card that names them. No card, no building.</p></div>
+      <div class="card" style="border-color:var(--gold)"><span class="ic">🤝</span><h3>Some homelands cannot finish alone</h3>
+        <p>If you run out of materials, <b>that is not a mistake</b>. Use the trade panel on the Build
+          step and go find a country with materials to spare.</p></div>
+    </div>
+    <div class="warn"><b>You do not have to wait for the mass game to trade.</b>
+      <p>River Delta has food coming out of its ears and almost no materials. The Highlands has the
+        opposite problem. Find each other early — the countries that trade first get to build first.</p></div>
+  </div>
+</section>
+
+<section class="slide" data-track="s">
+  <div class="inner">
+    <div class="eyebrow">Watch out</div>
+    <h2>Cheap cards are cheap for a reason</h2>
+    <p class="lead">Nothing in this game is labelled "bad". The cheapest policy always buys you something —
+      and quietly costs you something else. You will only find out when the meters move.</p>
+    <div class="grid g2">
+      <div class="card"><span class="ic">🌍</span><h3>You cannot build everything</h3>
+        <p>Every homeland starts short of something. Countries that trade early do better than countries that hoard.</p></div>
+      <div class="card"><span class="ic">🤝</span><h3>Harmony pays actual money</h3>
+        <p>It multiplies what every industry earns. A divided country collects less from the same factories.</p></div>
+    </div>
+    <div class="tags">
+      <span class="tag g">💰 20 coins to start</span>
+      <span class="tag g">💠 24 points to split</span>
+      <span class="tag g">🎴 5 rounds</span>
+      <span class="tag r">⚠️ Every choice has a cost</span>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-track="s">
+  <div class="inner">
+    <div class="eyebrow">The mass game</div>
+    <h2>Five rounds. Everything goes wrong.</h2>
+    <p class="lead">Haze, riots, brain drain, raiders, drought, a foreign firm with a tempting offer.
+      Every country in the room gets the same card at the same time.</p>
+    <div class="grid g3">
+      <div class="card"><span class="ic">🗣️</span><h3>Argue it out</h3><p>Discuss as a cabinet. The Leader has the final say — one choice only.</p></div>
+      <div class="card"><span class="ic">🤝</span><h3>Trade &amp; ally</h3><p>Defence proposes alliances. Trade sends goods. Pick the other country from the list on the Trade / Alliance tab — they have to accept. Alliances make co-operative choices far stronger.</p></div>
+      <div class="card"><span class="ic">📊</span><h3>Watch the meters</h3><p>Your city on screen changes with them — buildings, traffic, crowds, weather, smog.</p></div>
+    </div>
+    <div class="warn"><b>⏱️ You may be on a clock — and doing nothing is not a safe option.</b>
+      <p>Your teacher can put 1, 2 or 3 minutes on each card. The countdown shows at the top of your
+        screen. A country that runs out of time without agreeing on anything loses
+        <b>Stability and Harmony</b> — sitting on your hands costs you more than making an imperfect
+        choice. Decide, even if you are not sure.</p></div>
+  </div>
+</section>
+
+<section class="slide" data-track="s">
+  <div class="inner">
+    <div class="eyebrow">How you actually win</div>
+    <h2>Your weakest pillar drags everything down</h2>
+    <p class="lead">Six pillars are scored. Your overall score is pulled toward the <b style="color:var(--red)">lowest</b>
+      one — so a country that is brilliant at four things and hopeless at two will lose to a steady one.</p>
+    <div class="pillars">
+      <div class="pil"><div class="bar-f" style="height:82%"></div><small>💰 Wealth</small></div>
+      <div class="pil low"><div class="bar-f" style="height:26%"></div><small>🤝 Harmony</small></div>
+      <div class="pil"><div class="bar-f" style="height:70%"></div><small>⚖️ Stability</small></div>
+      <div class="pil"><div class="bar-f" style="height:76%"></div><small>📚 Knowledge</small></div>
+      <div class="pil"><div class="bar-f" style="height:68%"></div><small>🛡️ Defence</small></div>
+      <div class="pil low"><div class="bar-f" style="height:34%"></div><small>🌱 Green</small></div>
+    </div>
+    <p class="note">This country is rich, clever and safe — and finishes near the bottom.
+      Strip your forests and divide your people and you will have the most coins and nothing else.</p>
+  </div>
+</section>
+
+<section class="slide" data-track="s">
+  <div class="inner">
+    <div class="eyebrow">At the end</div>
+    <h2>Your country gets a title</h2>
+    <p class="lead">Not a score — a verdict. There are eight of them. Only one is the one you want.</p>
+    <div class="grid g2">
+      <div class="card" style="border-color:var(--grn)"><span class="ic">🏆</span><h3>The Complete Nation</h3>
+        <p>Strong everywhere, weak nowhere. This is what a well-rounded country looks like.</p></div>
+      <div class="card"><span class="ic">💔</span><h3>The Rich but Divided</h3>
+        <p>The money came. The people never became one nation.</p></div>
+      <div class="card"><span class="ic">🏭</span><h3>The Smoky Boomtown</h3>
+        <p>Full wallets, empty skies. The bill arrives later.</p></div>
+      <div class="card"><span class="ic">🏰</span><h3>The Fortress</h3>
+        <p>Safe from outside. Not safe from inside.</p></div>
+    </div>
+    <p class="note">Also in the deck: 🕊️ The Happy but Poor · 🌱 The Rising Republic · 🧭 The Steady Middle · 🧱 The Struggling State</p>
+  </div>
+</section>
+
+<section class="slide" data-track="s">
+  <div class="inner" style="text-align:center">
+    <div class="eyebrow">Ready?</div>
+    <h1>Go to <span style="color:var(--gold)" id="playUrl2">/play</span></h1>
+    <div style="display:flex;justify-content:center;margin-top:18px">
+      <div class="qr big" id="playQr2" hidden></div>
+    </div>
+    <p class="lead" style="margin-left:auto;margin-right:auto">Type whichever code your group was given,
+      and start building.</p>
+    <div class="big">🗺️ → 🪪 → 👑 → 💠 → 🗂️ → 🏘️ → 🏗️ → 🚀</div>
+  </div>
+</section>
+
+</main>
+
+<nav class="nav">
+  <button id="prev" onclick="go(-1)">← Back</button>
+  <div class="dots" id="dots"></div>
+  <button id="next" onclick="go(1)">Next →</button>
+</nav>
+<div class="hint">← → or Space · <kbd>T</kbd> next deck · <kbd>F</kbd> fullscreen · <kbd>P</kbd> print</div>
+
+<script src="/qr.js"></script>
+<script>
+/* Deck state. Four tracks share one file; only one track's slides are ever live. */
+var all = [].slice.call(document.querySelectorAll('.slide'));
+var TRACK_ORDER = ['s','t','g','a'];
+var track = 't', list = [], i = 0;
+
+function params(){ try { return new URLSearchParams(location.search); } catch(e){ return new URLSearchParams(''); } }
+
+/* Accepts the short code or the long-form alias for each of the four decks —
+   kept in lockstep with the list documented in README.md, so nothing here
+   works that the README does not also say works. */
+function normalizeTrack(q){
+  q = String(q||'').toLowerCase();
+  if(q === 's' || q === 'student') return 's';
+  if(q === 't' || q === 'teacher') return 't';
+  if(q === 'g' || q === 'gamemaster' || q === 'hall') return 'g';
+  if(q === 'a' || q === 'admin') return 'a';
+  return '';
+}
+
+/* Show the real address students should type, taken from wherever this page is served. */
+(function fillUrls(){
+  var base = location.origin;
+  if(!base || base === 'null') return;            /* opened as a bare file:// — leave the fallbacks */
+  var host = base + '/host', play = base + '/play', admin = base + '/admin';
+  var h = document.getElementById('hostUrl');  if(h) h.textContent = host;
+  var h2 = document.getElementById('hostUrl2'); if(h2) h2.textContent = host;
+  var p = document.getElementById('playUrl');  if(p) p.textContent = play;
+  var p2 = document.getElementById('playUrl2'); if(p2) p2.textContent = play.replace(/^https?:\/\//,'');
+  var a = document.getElementById('adminUrl'); if(a) a.textContent = admin;
+  /* Built from the same `play` string printed above, so the code and the text
+     can never disagree. The early return on file:// covers the offline case. */
+  /* Decorative only — boot() and the keydown handler below run after this
+     IIFE, so an uncaught throw here would leave the whole deck blank with no
+     navigation in front of the hall. Nothing is known to make QR.render()
+     throw, but the cost of guarding it is one line. */
+  try {
+    if (window.QR) {
+      QR.render(document.getElementById('playQr'),  play, { label: 'QR code for ' + play });
+      QR.render(document.getElementById('playQr2'), play, { label: 'QR code for ' + play });
+    }
+  } catch (e) {}
+})();
+
+/* Optional: /slides?room=ABCD prints the live room code on the class deck's commit/hall-join slide. */
+(function fillRoom(){
+  var r = (params().get('room') || '').trim().toUpperCase().slice(0,4);
+  if(!/^[A-Z0-9]{4}$/.test(r)) return;
+  var slot = document.getElementById('roomSlot');
+  if(!slot) return;
+  slot.innerHTML = '<div class="codebox"><div class="lbl">Room code</div><div class="val">'+r+'</div></div>';
+})();
+
+function setTrack(t, keepHash){
+  track = t;
+  [].slice.call(document.querySelectorAll('.trackBtn')).forEach(function(b){
+    b.setAttribute('aria-pressed', String(b.dataset.t === t));
+  });
+  document.getElementById('deck').dataset.track = t;   /* also scopes @media print, see <style> */
+  list = all.filter(function(s){ return s.dataset.track === t; });
+  document.getElementById('dots').innerHTML = list.map(function(_,n){
+    return '<button class="dot" onclick="jump('+n+')" aria-label="Slide '+(n+1)+'"></button>';
+  }).join('');
+  show(0, keepHash);
+}
+
+function show(n, keepHash){
+  i = Math.max(0, Math.min(list.length-1, n));
+  all.forEach(function(s){ s.classList.remove('on'); });
+  if(list[i]) { list[i].classList.add('on'); list[i].scrollTop = 0; }
+  [].slice.call(document.querySelectorAll('.dot')).forEach(function(d,n2){ d.classList.toggle('on', n2===i); });
+  document.getElementById('counter').textContent = (i+1) + ' / ' + list.length;
+  document.getElementById('prev').disabled = i===0;
+  document.getElementById('next').disabled = i===list.length-1;
+  if(!keepHash) history.replaceState(null, '', '#' + track + (i+1));
+}
+
+function go(d){ show(i+d); }
+function jump(n){ show(n); }
+
+document.addEventListener('keydown', function(e){
+  if(/^(INPUT|TEXTAREA)$/.test((e.target.tagName||''))) return;
+  var k = e.key;
+  if(k==='ArrowRight' || k==='PageDown' || k===' ') { e.preventDefault(); go(1); }
+  else if(k==='ArrowLeft' || k==='PageUp') { e.preventDefault(); go(-1); }
+  else if(k==='Home') { e.preventDefault(); show(0); }
+  else if(k==='End')  { e.preventDefault(); show(list.length-1); }
+  else if(k==='f' || k==='F'){
+    if(document.fullscreenElement) document.exitFullscreen();
+    else if(document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+  }
+  else if(k==='p' || k==='P'){ e.preventDefault(); window.print(); }
+  else if(k==='t' || k==='T'){
+    var ix = TRACK_ORDER.indexOf(track);
+    setTrack(TRACK_ORDER[(ix + 1) % TRACK_ORDER.length]);
+  }
+});
+
+/* Swipe on tablets and phones. */
+(function swipe(){
+  var x0=null, y0=null;
+  var deck = document.getElementById('deck');
+  deck.addEventListener('touchstart', function(e){ x0=e.touches[0].clientX; y0=e.touches[0].clientY; }, {passive:true});
+  deck.addEventListener('touchend', function(e){
+    if(x0===null) return;
+    var dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+    if(Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy)) go(dx < 0 ? 1 : -1);
+    x0 = y0 = null;
+  }, {passive:true});
+})();
+
+/* Boot: honour ?track= (short code or alias) and #t3 / #s5 / #g2 / #a4 deep links,
+   else default to the teacher run-sheet. */
+(function boot(){
+  var m = /^#([stga])(\d+)$/.exec(location.hash || '');
+  var q = normalizeTrack(params().get('track'));
+  var start = m ? m[1] : (q || 't');
+  setTrack(start, true);
+  if(m) show(parseInt(m[2],10) - 1, true);
+  else show(0, true);
+})();
+</script>
+</body>
+</html>

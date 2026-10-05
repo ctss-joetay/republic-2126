@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Republic 2126 — Admin</title>
+<style>
+:root{--bg:#070d18;--panel:#101a2c;--panel2:#16243c;--line:#22334f;--ink:#eaf1fb;--dim:#93a7c4;
+ --gold:#f4c542;--grn:#4ad991;--red:#ff6b6b}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(1200px 700px at 50% -10%,#16294a 0%,var(--bg)60%);color:var(--ink);
+ font:15px/1.55 "Segoe UI",system-ui,sans-serif}
+.wrap{max-width:1240px;margin:0 auto;padding:18px}
+h1{font-size:24px;margin:0} h2{font-size:19px;margin:0 0 8px} h3{margin:0 0 8px}
+.sub{color:var(--dim);font-size:13.5px}
+.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);
+ border-radius:16px;padding:16px;box-shadow:0 12px 34px rgba(0,0,0,.42)}
+.row{display:flex;gap:10px;align-items:center}.between{justify-content:space-between}.wrapf{flex-wrap:wrap}
+button{font:inherit;cursor:pointer;border-radius:12px;border:1px solid var(--line);background:var(--panel2);
+ color:var(--ink);padding:10px 15px}
+button:hover{filter:brightness(1.15)}
+button:disabled{opacity:.45;cursor:not-allowed;filter:none}
+.p{background:linear-gradient(135deg,#2f7ff0,#1a4fb8);border-color:#3f8bff;font-weight:700}
+.gold{background:linear-gradient(135deg,#f4c542,#d99b1a);border-color:#f4c542;color:#241a00;font-weight:800}
+.sm{padding:7px 11px;font-size:13px;border-radius:10px}
+.hidden{display:none!important}
+/* A revealed host key. Monospace and gold because it gets read aloud or copied
+   into the console, and the two things it is read next to — the room code and
+   a class label — must not look like it. */
+.hostkey{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px;letter-spacing:2px;
+  color:var(--gold);background:#0a1526;border:1px solid var(--line);border-radius:7px;padding:3px 10px;
+  user-select:all}
+input{font:inherit;background:#0c1424;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:10px 12px}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:1.2fr .8fr}
+.g3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.lb{display:flex;gap:11px;align-items:center;padding:9px 11px;border-radius:12px;background:var(--panel);
+ border:1px solid var(--line);margin-bottom:7px}
+.big{font-size:26px;font-weight:900}
+@media(max-width:900px){.g2{grid-template-columns:1fr}}
+</style>
+</head>
+<body><div class="wrap">
+
+<div class="row between wrapf" style="margin-bottom:14px">
+  <div><h1>🗝️ Republic 2126 — Admin</h1>
+    <div class="sub">The master switch. This can delete every country in the cohort.</div></div>
+</div>
+
+<div class="card" id="gate" style="max-width:420px;margin:40px auto;text-align:center">
+  <h2>🗝️ Admin</h2>
+  <div class="sub" id="gateHint">Enter the admin password you chose at setup, or the <code>ADMIN_KEY</code> set in Railway.</div>
+  <input id="key" type="password" placeholder="admin key" style="width:260px;margin-top:12px">
+  <button class="gold" onclick="load()">Open</button>
+  <div class="sub" id="gateMsg" style="margin-top:10px;color:var(--red)"></div>
+</div>
+
+<div id="panel" class="hidden">
+  <div class="card" style="margin-bottom:12px">
+    <div class="row between wrapf">
+      <div><b>Rooms</b> <span class="sub" id="count">—</span></div>
+      <div class="row" style="gap:8px">
+        <button class="sm" onclick="backup()">💾 Download everything</button>
+        <button class="sm" onclick="delSelected()">🗑 Delete selected</button>
+      </div>
+    </div>
+    <div id="rooms" style="margin-top:10px"></div>
+  </div>
+  <div class="card" style="margin-bottom:12px">
+    <h3>Create class rooms in advance</h3>
+    <div class="sub">One class name per line. Each becomes a classroom room stamped as
+      yours — only countries from these rooms can be brought into the hall.</div>
+    <textarea id="classNames" rows="6" placeholder="3E1&#10;3E2&#10;3E3"
+              style="width:100%;margin-top:8px"></textarea>
+    <button class="gold" onclick="makeRooms()">Create rooms</button>
+    <div id="madeRooms" style="margin-top:10px"></div>
+  </div>
+  <div class="card" style="border-color:var(--red)">
+    <div class="sub">Delete <b>every</b> room, including any game in progress.</div>
+    <input id="confirm" placeholder="type DELETE" style="width:150px;text-align:center" oninput="armWipe()">
+    <button id="wipeBtn" disabled onclick="wipe()">Delete everything</button>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let KEY = '';
+const post = (p, body) => fetch(p, { method:'POST', headers:{'Content-Type':'application/json'},
+  body: JSON.stringify({ key:KEY, ...body }) }).then(r=>r.json());
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ago = t => { const m = Math.round((Date.now()-t)/60000); return m < 1 ? 'just now' : m < 60 ? m+' min' : m < 1440 ? Math.round(m/60)+' hr' : Math.round(m/1440)+' days'; };
+
+async function load(){
+  KEY = $('key').value;
+  const r = await post('/api/admin/list');
+  if(r.error){ $('gateMsg').textContent = r.error; return; }
+  $('gateMsg').textContent = '';
+  $('gate').classList.add('hidden'); $('panel').classList.remove('hidden');
+  render(r.rooms);
+}
+/* Oldest-touched first (the server already sorts this way), so the junk
+   floats up and a live game sinks. The country count and "touched 1 min
+   ago" are what stop you deleting the hall room during the event.
+   Every interpolated field — including origin, and the room code repeated
+   into the Trust button's onclick — goes through esc(), the same as every
+   other cell in this row: a room label comes from a text field a teacher
+   typed, and this template is rendered back onto the page via innerHTML. */
+function render(rooms){
+  $('count').textContent = rooms.length + ' total';
+  $('rooms').innerHTML = rooms.map(r=>{
+    /* Only a class room's origin is ever read by anything (see server.js's
+       trusted()/pullCountry()/join-hall) — a hall room's own origin is
+       always 'self' the moment it is opened from /host, which is the normal
+       way every hall opens. Tagging it untrusted with a Trust button beside
+       it, on the one screen open during the busiest part of the event,
+       would be a false alarm about the room holding all 300 countries and
+       nothing else. So both are scoped to class rooms, the only kind where
+       origin means anything. */
+    const untrusted = r.kind === 'class' && r.origin === 'self';
+    /* Legacy rooms (no origin key at all) are already trusted() — see
+       server.js's trusted() — so only 'self' gets the escape hatch. A
+       button on an already-trusted room would be noise at best, a
+       misclick at worst. */
+    const originTag = untrusted ? 'untrusted (self-made)' : (r.origin || 'legacy');
+    /* Both buttons stop the click before it reaches the <label> around them.
+       Without that, pressing either one ALSO ticks this room's delete
+       checkbox — a label activates its control for a click anywhere inside
+       it — so asking a live class for its host key would quietly arm it for
+       "Delete selected". */
+    const trustBtn = untrusted
+      ? `<button class="sm" onclick="stop(event);trustRoom('${esc(r.code)}')">Trust this room</button>` : '';
+    return `
+    <label class="lb" style="align-items:center;cursor:pointer">
+      <input type="checkbox" class="pick" value="${esc(r.code)}">
+      <div style="flex:1;margin-left:10px">
+        <b>${esc(r.code)}</b> <span class="sub">${esc(r.kind)}${r.label?' · '+esc(r.label):''}${r.kind==='class'?' · '+esc(originTag):''}</span>
+        <div class="sub">${esc(r.countries)} countries of ${esc(r.slots)} provisioned · ${esc(r.committed)} committed · ${esc(r.phase)} round ${esc(r.round)} · touched ${ago(r.touched)} ago</div>
+        <div class="row" style="gap:8px;align-items:center;margin-top:2px">
+          <button class="sm" onclick="stop(event);revealKey('${esc(r.code)}')">🔑 Host key</button>
+          <code class="hostkey hidden" id="hk_${esc(r.code)}"></code>
+          ${trustBtn}
+        </div>
+      </div>
+    </label>`;
+  }).join('') || '<div class="sub">No rooms.</div>';
+}
+const picked = () => [...document.querySelectorAll('.pick:checked')].map(el=>el.value);
+async function delSelected(){
+  const rooms = picked();
+  if(!rooms.length) return alert('Tick the rooms you want removed.');
+  if(!confirm(`Delete ${rooms.length} room(s): ${rooms.join(', ')}?\n\nEvery country in them goes too.`)) return;
+  const r = await post('/api/admin/delete', { rooms });
+  if(r.error) return alert(r.error);
+  load();
+}
+function armWipe(){
+  $('wipeBtn').disabled = $('confirm').value !== 'DELETE';
+}
+async function wipe(){
+  if(!confirm('Delete EVERY room on the server, including any game in progress?\n\nCountries in them cannot be recovered without a backup.')) return;
+  const r = await post('/api/admin/wipe', { confirm:'DELETE' });
+  if(r.error) return alert(r.error);
+  $('confirm').value = ''; armWipe(); load();
+}
+async function backup(){
+  const r = await post('/api/admin/export');
+  if(r.error) return alert(r.error);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(r.rooms)], { type:'application/json' }));
+  a.download = r.file; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+}
+async function makeRooms(){
+  const labels = document.getElementById('classNames').value.split('\n')
+    .map(s=>s.trim()).filter(Boolean);
+  if(!labels.length) return alert('Type at least one class name.');
+  const r = await post('/api/admin/rooms', { labels });
+  if(r.error) return alert(r.error);
+  /* Host keys are the one thing on this page worth printing. Rendered as text
+     nodes, never innerHTML with interpolation — a class name comes from a
+     textarea and goes straight back onto the screen. */
+  const box = document.getElementById('madeRooms');
+  box.textContent = '';
+  const t = document.createElement('table');
+  const head = document.createElement('tr');
+  for(const h of ['Class','Room code','Host key']){
+    const th = document.createElement('th'); th.textContent = h; head.appendChild(th);
+  }
+  t.appendChild(head);
+  for(const row of r.rooms){
+    const tr = document.createElement('tr');
+    for(const v of [row.label, row.room, row.hostKey]){
+      const td = document.createElement('td'); td.textContent = v; tr.appendChild(td);
+    }
+    t.appendChild(tr);
+  }
+  box.appendChild(t);
+  load();
+}
+/* Keeps a press on a button inside a row from reaching the row's <label>,
+   which would tick that room's delete checkbox. */
+function stop(e){ e.preventDefault(); e.stopPropagation(); }
+
+/* One room's host key, on request. The list itself still carries none: a key
+   is a credential and this page is the one most likely to be photographed, so
+   thirty keys on screen is thirty credentials in one screenshot. Fetched and
+   shown for the room actually asked about, and only that one.
+
+   Written with textContent, never innerHTML — and pressing again hides it, so
+   it does not sit on a projected or shared screen once it has been written
+   down. */
+async function revealKey(code){
+  const out = document.getElementById('hk_' + code);
+  if(!out) return;
+  if(!out.classList.contains('hidden')){        /* already showing — put it away */
+    out.textContent = ''; out.classList.add('hidden'); return;
+  }
+  const r = await post('/api/admin/key', { room: code });
+  if(r.error) return alert(r.error);
+  out.textContent = r.hostKey;
+  out.classList.remove('hidden');
+}
+async function trustRoom(code){
+  if(!confirm(`Trust room ${code}?\n\nCountries in it will be allowed into the hall. Do this only for a room a teacher opened by mistake.`)) return;
+  const r = await post('/api/admin/trust', { room:code });
+  if(r.error) return alert(r.error);
+  load();
+}
+</script>
+</div><script>
+/* A fresh server with no admin password yet: send the teacher to /setup rather
+   than leaving them guessing at a password that does not exist. */
+fetch('/api/setup/status').then(r => r.json()).then(st => {
+  if(st && st.needed) document.getElementById('gateHint').innerHTML =
+    'This server has no admin password yet. <a href="/setup" style="color:var(--gold)">Set it up first →</a>';
+}).catch(() => {});
+</script>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Republic 2126 — Setup</title>
+<style>
+:root{--bg:#070d18;--panel:#101a2c;--panel2:#16243c;--line:#22334f;--ink:#eaf1fb;--dim:#93a7c4;
+ --gold:#f4c542;--grn:#4ad991;--red:#ff6b6b}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(1200px 700px at 50% -10%,#16294a 0%,var(--bg)60%);color:var(--ink);
+ font:15px/1.55 "Segoe UI",system-ui,sans-serif}
+.wrap{max-width:620px;margin:0 auto;padding:24px 16px}
+h1{font-size:24px;margin:0 0 4px} h2{font-size:18px;margin:0 0 6px}
+.sub{color:var(--dim);font-size:14px}
+.card{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);
+ border-radius:16px;padding:18px;box-shadow:0 12px 34px rgba(0,0,0,.42);margin-top:14px}
+.step{display:inline-block;width:26px;height:26px;border-radius:50%;background:var(--gold);color:#241a00;
+ font-weight:800;text-align:center;line-height:26px;margin-right:8px}
+.row{display:flex;gap:8px;align-items:center}
+button{font:inherit;cursor:pointer;border-radius:12px;border:1px solid var(--line);background:var(--panel2);
+ color:var(--ink);padding:10px 15px;white-space:nowrap}
+button:hover{filter:brightness(1.15)}
+button:disabled{opacity:.45;cursor:not-allowed;filter:none}
+.gold{background:linear-gradient(135deg,#f4c542,#d99b1a);border-color:#f4c542;color:#241a00;font-weight:800}
+input{font:inherit;background:#0c1424;border:1px solid var(--line);color:var(--ink);border-radius:10px;
+ padding:10px 12px;width:100%;min-width:0}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:1px}
+label{display:block;font-weight:700;margin:12px 0 4px}
+.err{color:var(--red);margin-top:10px;min-height:1.2em}
+.key{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:16px;letter-spacing:1px;color:var(--gold);
+ background:#0a1526;border:1px solid var(--line);border-radius:8px;padding:8px 12px;user-select:all;word-break:break-all;flex:1}
+.hidden{display:none!important}
+code{background:#0a1526;padding:1px 6px;border-radius:5px}
+</style>
+</head>
+<body><div class="wrap">
+
+<h1>🏙️ Republic 2126 — Setup</h1>
+<div class="sub">Two passwords for this server. You only do this once.</div>
+
+<div id="loading" class="card sub">Checking this server…</div>
+
+<!-- Already configured: nothing to do here. -->
+<div id="done" class="card hidden">
+  <h2>✅ This server is set up</h2>
+  <div class="sub">To change a password, set <code>ADMIN_KEY</code> or <code>HALL_KEY</code> in the
+    Variables tab of your Railway service. Railway restarts the server with the new value.</div>
+  <div class="row" style="margin-top:14px;flex-wrap:wrap">
+    <a href="/admin"><button class="gold">Open the admin page →</button></a>
+    <a href="/host"><button>Open the teacher console</button></a>
+  </div>
+</div>
+
+<!-- The form. -->
+<div id="form" class="hidden">
+  <div class="card">
+    <h2><span class="step">1</span>Setup code</h2>
+    <div class="sub">This stops anyone else who finds the site from setting it up first. In Railway,
+      open your service → <b>Variables</b> and copy <code>SETUP_CODE</code>. If it is not there,
+      open <b>Deployments</b> → <b>View logs</b> and look for the line <code>SETUP CODE:</code>.</div>
+    <label for="code">Setup code</label>
+    <input id="code" class="mono" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. K7M2QX9PAB">
+  </div>
+
+  <div class="card">
+    <h2><span class="step">2</span>Admin password</h2>
+    <div class="sub">Opens <code>/admin</code>, where you create class rooms and can delete every country.
+      Keep it to yourself. At least 16 characters.</div>
+    <label for="adminKey">Admin password</label>
+    <div class="row">
+      <input id="adminKey" class="mono" autocomplete="off" spellcheck="false">
+      <button onclick="gen('adminKey', 24)">Make one for me</button>
+    </div>
+  </div>
+
+  <div class="card" id="hallCard">
+    <h2><span class="step">3</span>Hall key</h2>
+    <div class="sub">Opens a hall room for the whole cohort. Give it to whoever runs the event.
+      At least 8 characters, and different from the admin password.</div>
+    <label for="hallKey">Hall key</label>
+    <div class="row">
+      <input id="hallKey" class="mono" autocomplete="off" spellcheck="false">
+      <button onclick="gen('hallKey', 10)">Make one for me</button>
+    </div>
+  </div>
+  <div class="card sub hidden" id="hallPreset">✅ The hall key is already set in Railway's Variables.</div>
+
+  <div class="card">
+    <label class="row" style="font-weight:400;margin:0">
+      <input type="checkbox" id="saved" style="width:20px;height:20px;flex:none">
+      I have written both down somewhere safe. They are not shown again.
+    </label>
+    <button class="gold" id="go" style="width:100%;margin-top:14px" onclick="submit()">Save and finish</button>
+    <div class="err" id="err"></div>
+  </div>
+</div>
+
+<!-- Finished. -->
+<div id="ok" class="card hidden">
+  <h2>✅ Saved</h2>
+  <div class="sub">Write these down now. This page will not show them again.</div>
+  <label>Admin password</label>
+  <div class="row"><div class="key" id="okAdmin"></div><button onclick="copy('okAdmin', this)">Copy</button></div>
+  <div id="okHallWrap">
+    <label>Hall key</label>
+    <div class="row"><div class="key" id="okHall"></div><button onclick="copy('okHall', this)">Copy</button></div>
+  </div>
+  <div class="sub" style="margin-top:14px">Next: open the admin page and create a class room for each class.</div>
+  <a href="/admin"><button class="gold" style="width:100%;margin-top:12px">Open the admin page →</button></a>
+</div>
+
+</div>
+<script>
+const $ = id => document.getElementById(id);
+let HALL_PRESET = false;
+
+/* Letters and digits that cannot be misread for each other when copied off a
+   sheet: no 0/O, 1/l/I. crypto.getRandomValues, not Math.random. */
+const ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+function gen(id, n){
+  const buf = new Uint32Array(n);
+  crypto.getRandomValues(buf);
+  $(id).value = Array.from(buf, x => ALPHA[x % ALPHA.length]).join('');
+}
+
+async function start(){
+  let st;
+  try { st = await fetch('/api/setup/status').then(r => r.json()); }
+  catch(e){ $('loading').textContent = 'Could not reach the server. Refresh to try again.'; return; }
+  $('loading').classList.add('hidden');
+  if(!st.needed){ $('done').classList.remove('hidden'); return; }
+  HALL_PRESET = !!st.hallFromRailway;
+  $('hallCard').classList.toggle('hidden', HALL_PRESET);
+  $('hallPreset').classList.toggle('hidden', !HALL_PRESET);
+  $('form').classList.remove('hidden');
+}
+
+async function submit(){
+  $('err').textContent = '';
+  const code = $('code').value.trim(), adminKey = $('adminKey').value.trim(), hallKey = $('hallKey').value.trim();
+  if(!code) return $('err').textContent = 'Enter the setup code from the Railway log.';
+  if(adminKey.length < 16) return $('err').textContent = 'The admin password needs at least 16 characters.';
+  if(!HALL_PRESET && hallKey.length < 8) return $('err').textContent = 'The hall key needs at least 8 characters.';
+  if(!HALL_PRESET && hallKey === adminKey) return $('err').textContent = 'Use a different hall key from the admin password.';
+  if(!$('saved').checked) return $('err').textContent = 'Tick the box once you have written both down.';
+  $('go').disabled = true;
+  let r;
+  try {
+    r = await fetch('/api/setup', { method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ code, adminKey, hallKey }) }).then(x => x.json());
+  } catch(e){ r = { error: 'Could not reach the server. Try again.' }; }
+  $('go').disabled = false;
+  if(r.error) return $('err').textContent = r.error;
+  $('okAdmin').textContent = adminKey;
+  $('okHall').textContent = hallKey;
+  $('okHallWrap').classList.toggle('hidden', HALL_PRESET);
+  $('form').classList.add('hidden');
+  $('ok').classList.remove('hidden');
+}
+
+async function copy(id, btn){
+  try { await navigator.clipboard.writeText($(id).textContent); btn.textContent = 'Copied'; }
+  catch(e){ btn.textContent = 'Select and copy'; }
+  setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+}
+
+start();
+</script>
+</body>
+</html>
