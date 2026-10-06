@@ -340,6 +340,7 @@ dialog::backdrop{background:rgba(3,7,15,.72)}
             <input id="nGroups" type="number" min="1" max="40" value="6" style="width:70px;text-align:center">
             <button class="sm" onclick="setGroups()">Set</button>
             <button class="sm" id="finishBtn" disabled onclick="finishSession()">Ready for the hall ✓</button>
+            <button class="sm" onclick="printSlips()" title="One page per group, cut into six slips — each student gets only their own code">🖨 Print slips</button>
           </div>
         </div>
         <!-- Hall only: slot numbers were dropped on purpose (see renderRoster
@@ -1646,6 +1647,79 @@ async function pullIn(){
   const r = await api('POST','/api/host/country',{ room:R.room, hostKey:R.key, code, act:'pull' });
   if(r.error) return alert(r.error);
   $('pullCode').value = ''; tick();
+}
+/* ---- printing the codes as cut-out slips ----
+
+   The roster shows every group's six codes at once, so handing them out from
+   the screen means every student sees everyone's. This builds one A4 page per
+   group, cut along the dashed lines into six strips — Leader, the four
+   ministers, and the spare class code — so each student holds only their own.
+
+   slipsDoc() is pure (a test pins it): it takes the roster and returns a whole
+   printable document. One code per strip is the property that matters; the
+   host key is never passed in for printing and never written out. The QR opens
+   /play?code=…, which the student app's autoJoin() fills in for them. */
+function slipsDoc(roster, opts){
+  const o = opts || {};
+  const origin = String(o.origin || '');
+  const host = origin.replace(/^https?:\/\//, '');
+  const label = String(o.label || '').trim();
+  const strip = (icon, role, note, code, groupLine) => `
+    <div class="strip">
+      <div class="txt">
+        <div class="grp">${esc(groupLine)}</div>
+        <div class="role">${icon} ${esc(role)}</div>
+        ${note ? `<div class="note">${esc(note)}</div>` : ''}
+        <div class="code">${esc(code)}</div>
+        <div class="how">Scan the code, or open <b>${esc(host)}/play</b> and type it in.</div>
+      </div>
+      <div class="qr">${o.qr ? (o.qr(origin + '/play?code=' + encodeURIComponent(code)) || '') : ''}</div>
+    </div>`;
+  const pages = (roster || []).map(t => {
+    const groupLine = [label, 'Group ' + (t.slot || ''), String(t.name || '').trim()].filter(Boolean).join(' · ');
+    const mins = ROLES.filter(r => r.key !== 'leader');
+    const leader = ROLES.find(r => r.key === 'leader') || { icon:'👑', name:'Leader' };
+    return `<div class="page">
+      ${strip(leader.icon, leader.name, 'Keep this one safe — it drives the whole country.', t.code, groupLine)}
+      ${mins.map(r => strip(r.icon, r.name, '', (t.minCodes || {})[r.key] || '', groupLine)).join('')}
+      ${strip('👀', 'Spare (class code)', 'Watch only. For a sixth student, or if an iPad dies.', t.viewCode || '', groupLine)}
+    </div>`;
+  }).join('');
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Republic 2126 slips${label ? ' — ' + esc(label) : ''}</title>
+<style>
+  @page { size: A4 portrait; margin: 10mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color: #101828;
+         -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .page { height: 274mm; display: flex; flex-direction: column; page-break-after: always; break-after: page; }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+  .strip { flex: 1; display: flex; align-items: center; gap: 6mm; padding: 2mm 6mm;
+           border-bottom: 1px dashed #98a2b3; }
+  .strip:last-child { border-bottom: none; }
+  .txt { flex: 1; min-width: 0; }
+  .grp { font-size: 9pt; color: #667085; }
+  .role { font-size: 13pt; font-weight: 800; margin-top: 1mm; }
+  .note { font-size: 9pt; color: #475467; }
+  .code { font-family: ui-monospace, Menlo, monospace; font-size: 26pt; font-weight: 700; letter-spacing: 5px; margin: 1mm 0; }
+  .how { font-size: 8.5pt; color: #667085; }
+  .qr svg { display: block; width: 32mm; height: 32mm; }
+  @media screen { body { background: #e4e7ec; } .page { background: #fff; width: 190mm; margin: 8mm auto; padding: 0 4mm; } }
+</style></head><body>${pages}</body></html>`;
+}
+/* Opens the slips in their own window and raises the print dialog there, so
+   the console behind stays exactly as it was. "Save as PDF" in that dialog
+   gives one file, one page per group. */
+function printSlips(){
+  if(!lastRoster.length) return alert('Set the number of groups first.');
+  const w = window.open('', '_blank');
+  if(!w) return alert('Your browser blocked the print window. Allow pop-ups for this site and press Print slips again.');
+  const qr = (url) => (window.QR && QR.svg(url, { quiet:2 })) || '';
+  w.document.open();
+  w.document.write(slipsDoc(lastRoster, { label: R.label || '', origin: location.origin, qr }));
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 300);
 }
 /* A checklist, not an action: it only shows the handover instructions and
    records a feed line (host/act's 'finish' branch) — it destroys nothing and

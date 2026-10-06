@@ -207,6 +207,14 @@ See *Building during the hall*, below, for what a tap there now does.
 
 ### Printing the codes
 
+**From the teacher console (the usual way).** On a classroom room, press **🖨 Print slips**
+beside *How many groups?*. It opens one A4 page per group, cut along the dashed lines into six
+strips — Leader, the four ministers, and the spare class code — each with its own QR code that
+opens `/play` with the code filled in. Each student gets only their own strip, so nobody has to
+read codes off the projected roster. *Save as PDF* in the print dialog gives one file with every
+group. The host key is never printed.
+
+**From the command line (for a whole cohort at once).**
 `tools/make-slips.js` prints six QRs per group's page — the leader code large at the top, the
 four ministry codes in a labelled row beneath it, and the class code demoted to a small "spare
 device" corner — plus, per class, a second summary sheet of the four ministry columns beside
